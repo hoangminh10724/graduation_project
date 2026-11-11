@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Data & models (quá nặng, không đưa vào git)
+data/
+datasets/
+models/
+checkpoints/
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.gguf
+*.wav
+*.webm
+
+# Docker / OS / IDE
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+~$*.xlsx
+
+# Kế hoạch nội bộ, không đẩy lên repo
+*.xlsx

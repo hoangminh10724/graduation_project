@@ -1,0 +1,67 @@
+openapi: 3.0.3
+info:
+  title: WordSpeak Core API contract
+  version: 0.1.0
+  description: Hợp đồng giữa frontend, backend và ai-service. Sửa file này trước khi đổi API.
+paths:
+  /health:
+    get:
+      summary: Kiểm tra sống (có ở backend và ai-service)
+      responses:
+        '200': {description: OK}
+  /assess:
+    post:
+      summary: (ai-service) Chấm phát âm
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [audio, text]
+              properties:
+                audio: {type: string, format: binary}
+                text: {type: string}
+      responses:
+        '200':
+          description: Điểm theo âm vị, từ, câu
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Assessment'}
+  /cards/due:
+    get:
+      summary: (backend) Thẻ FSRS đến hạn
+      responses:
+        '200': {description: Danh sách thẻ}
+  /reviews:
+    post:
+      summary: (backend) Ghi đánh giá thẻ (rating 1-4)
+      responses:
+        '200': {description: Lịch ôn kế tiếp}
+  /ws/audio:
+    get:
+      summary: (backend, WebSocket) Gửi chunk audio, nhận kết quả từng phần
+      responses:
+        '101': {description: Switching Protocols}
+components:
+  schemas:
+    Assessment:
+      type: object
+      properties:
+        sentence_score: {type: number, minimum: 0, maximum: 100}
+        words:
+          type: array
+          items:
+            type: object
+            properties:
+              word: {type: string}
+              score: {type: number}
+              phonemes:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    ipa: {type: string}
+                    score: {type: number}
+                    start: {type: number}
+                    end: {type: number}

@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+httpx>=0.27
+pytest>=8.0
+# ML (thêm khi làm tuần 1-3, cần GPU/CUDA phù hợp):
+# torch, torchaudio, transformers, faster-whisper
