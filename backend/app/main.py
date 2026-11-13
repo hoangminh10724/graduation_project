@@ -1,7 +1,11 @@
 import os
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+
+from .db import DatabaseConfigurationError, get_engine
 
 app = FastAPI(title="WordSpeak backend")
 
@@ -13,8 +17,14 @@ app.add_middleware(
 )
 
 
-@app.get("/health")
-def health():
+@app.get("/health", responses={503: {"description": "Database unavailable"}})
+def health(response: Response) -> dict[str, str]:
+    try:
+        with get_engine().connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except (DatabaseConfigurationError, SQLAlchemyError):
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"status": "unavailable"}
     return {"status": "ok"}
 
 

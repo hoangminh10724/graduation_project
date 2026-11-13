@@ -6,9 +6,18 @@ info:
 paths:
   /health:
     get:
-      summary: Kiểm tra sống (có ở backend và ai-service)
+      summary: Kiểm tra trạng thái dịch vụ (backend kiểm tra cả kết nối DB)
       responses:
         '200': {description: OK}
+        '503':
+          description: Backend không kết nối được DB
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: {type: string, enum: [unavailable]}
   /assess:
     post:
       summary: (ai-service) Chấm phát âm
