@@ -5,9 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from . import auth, cards
 from .db import DatabaseConfigurationError, get_engine
 
 app = FastAPI(title="WordSpeak backend")
+app.include_router(auth.router)
+app.include_router(cards.router)
 
 app.add_middleware(
     CORSMiddleware,

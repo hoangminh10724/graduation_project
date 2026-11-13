@@ -37,23 +37,123 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Assessment'}
+  /auth/register:
+    post:
+      summary: Đăng ký tài khoản và lấy JWT
+      requestBody:
+        $ref: '#/components/requestBodies/Credentials'
+      responses:
+        '201':
+          $ref: '#/components/responses/Token'
+        '409': {description: Email đã đăng ký}
+  /auth/login:
+    post:
+      summary: Đăng nhập và lấy JWT
+      requestBody:
+        $ref: '#/components/requestBodies/Credentials'
+      responses:
+        '200':
+          $ref: '#/components/responses/Token'
+        '401': {description: Thông tin đăng nhập không hợp lệ}
+  /cards:
+    post:
+      summary: Tạo thẻ cho người dùng hiện tại
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [front, back]
+              properties:
+                front: {type: string, minLength: 1, maxLength: 5000}
+                back: {type: string, minLength: 1, maxLength: 5000}
+      responses:
+        '201':
+          description: Thẻ vừa tạo
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Card'}
   /cards/due:
     get:
       summary: (backend) Thẻ FSRS đến hạn
+      security: [{BearerAuth: []}]
       responses:
-        '200': {description: Danh sách thẻ}
+        '200':
+          description: Danh sách thẻ
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Card'}
   /reviews:
     post:
       summary: (backend) Ghi đánh giá thẻ (rating 1-4)
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [card_id, rating]
+              properties:
+                card_id: {type: integer, minimum: 1}
+                rating: {type: integer, minimum: 1, maximum: 4}
       responses:
-        '200': {description: Lịch ôn kế tiếp}
+        '200':
+          description: Lịch ôn kế tiếp
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [card, interval_days]
+                properties:
+                  card: {$ref: '#/components/schemas/Card'}
+                  interval_days: {type: integer, minimum: 1}
+        '404': {description: Không tìm thấy thẻ của người dùng hiện tại}
   /ws/audio:
     get:
       summary: (backend, WebSocket) Gửi chunk audio, nhận kết quả từng phần
       responses:
         '101': {description: Switching Protocols}
 components:
+  securitySchemes:
+    BearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  requestBodies:
+    Credentials:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [email, password]
+            properties:
+              email: {type: string, format: email, maxLength: 255}
+              password: {type: string, minLength: 8, description: Tối đa 72 byte UTF-8}
+  responses:
+    Token:
+      description: JWT có hiệu lực một giờ
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [access_token, token_type]
+            properties:
+              access_token: {type: string}
+              token_type: {type: string, enum: [bearer]}
   schemas:
+    Card:
+      type: object
+      required: [id, front, back, due, stability, difficulty]
+      properties:
+        id: {type: integer}
+        front: {type: string}
+        back: {type: string}
+        due: {type: string, format: date-time}
+        stability: {type: number}
+        difficulty: {type: number}
     Assessment:
       type: object
       properties:
