@@ -113,9 +113,102 @@ paths:
                   card: {$ref: '#/components/schemas/Card'}
                   interval_days: {type: integer, minimum: 1}
         '404': {description: Không tìm thấy thẻ của người dùng hiện tại}
+  /transcribe:
+    post:
+      summary: (ai-service) Nhận dạng một lượt nói
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [audio]
+              properties:
+                audio: {type: string, format: binary}
+      responses:
+        '200':
+          description: Transcript tiếng Anh
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [text]
+                properties:
+                  text: {type: string, minLength: 1, maxLength: 5000}
+  /sessions:
+    post:
+      summary: Tạo phiên Talk cho người dùng hiện tại
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                topic: {type: string, maxLength: 120, default: ''}
+                cefr_level: {type: string, enum: [A2, B1, B2], default: A2}
+      responses:
+        '201':
+          description: Phiên Talk vừa tạo
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, topic, cefr_level]
+                properties:
+                  id: {type: integer}
+                  topic: {type: string}
+                  cefr_level: {type: string, enum: [A2, B1, B2]}
+  /chat/stream:
+    post:
+      summary: Gửi một lượt Talk dạng văn bản
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, text]
+              properties:
+                session_id: {type: integer, minimum: 1}
+                text: {type: string, minLength: 1, maxLength: 5000}
+      responses:
+        '200':
+          description: SSE gồm token, done hoặc error. Token và done có text, error có code.
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '404': {description: Không tìm thấy phiên của người dùng hiện tại}
+  /progress:
+    get:
+      summary: Tổng lượt luyện, chuỗi ngày UTC và điểm trung bình theo âm IPA
+      security: [{BearerAuth: []}]
+      responses:
+        '200':
+          description: Tiến độ người dùng hiện tại
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attempts, streak_days, phoneme_averages]
+                properties:
+                  attempts: {type: integer}
+                  streak_days: {type: integer}
+                  phoneme_averages:
+                    type: object
+                    additionalProperties: {type: number}
   /ws/audio:
     get:
-      summary: (backend, WebSocket) Gửi chunk audio, nhận kết quả từng phần
+      summary: (backend, WebSocket) Gửi audio, nhận chấm điểm và phản hồi Talk
+      description: >
+        Gửi chunk nhị phân, tối đa 8 MiB mỗi lượt, rồi gửi JSON
+        {"type":"end","token":"JWT","media_type":"audio/webm"}.
+        media_type hỗ trợ audio/webm và audio/wav. text là câu mẫu tùy chọn.
+        session_id tùy chọn để nhận thêm phản hồi Talk.
+        partial trả received_bytes. final trả text và assessment.
+        Sau final, phiên Talk trả token và done có text hoặc error có code.
       responses:
         '101': {description: Switching Protocols}
 components:

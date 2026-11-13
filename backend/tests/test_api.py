@@ -3,6 +3,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.exc import OperationalError
 
 from app import main
+from app.db import get_db
 from app.main import app
 
 client = TestClient(app)
@@ -35,7 +36,8 @@ def test_health_when_database_is_unavailable(monkeypatch):
         engine.dispose()
 
 
-def test_ws_audio_counts_bytes():
+def test_ws_audio_counts_bytes(monkeypatch):
+    monkeypatch.setitem(app.dependency_overrides, get_db, lambda: None)
     with client.websocket_connect("/ws/audio") as ws:
         ws.send_bytes(b"1234")
         assert ws.receive_json()["received_bytes"] == 4

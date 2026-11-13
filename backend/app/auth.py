@@ -58,9 +58,13 @@ def current_user(
 ) -> User:
     if credentials is None:
         raise unauthorized()
+    return user_from_token(db, credentials.credentials)
+
+
+def user_from_token(db: Session, token: str) -> User:
     try:
         claims = jwt.decode(
-            credentials.credentials, jwt_secret(), algorithms=["HS256"],
+            token, jwt_secret(), algorithms=["HS256"],
             options={"require": ["exp", "sub"]},
         )
         user_id = int(claims["sub"])

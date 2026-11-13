@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy import func, select
-from typing import Annotated
 
 from . import fsrs
 from .auth import CurrentUser, DB

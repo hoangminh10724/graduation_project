@@ -37,6 +37,14 @@ class Card(Base):
     due: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class DialogueTurn(Base):
+    __tablename__ = "dialogue_turns"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("sessions.id"), index=True)
+    learner_text: Mapped[str] = mapped_column(Text)
+    tutor_text: Mapped[str] = mapped_column(Text)
+
+
 class Review(Base):
     __tablename__ = "reviews"
     id: Mapped[int] = mapped_column(primary_key=True)
