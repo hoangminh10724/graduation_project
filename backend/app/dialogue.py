@@ -3,11 +3,13 @@ import logging
 from collections.abc import AsyncIterator
 from time import perf_counter
 from typing import Annotated, Literal
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, StringConstraints
-from sqlalchemy import select
+from sqlalchemy import select, update, or_
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
@@ -62,6 +64,54 @@ def dialogue_context(db: DB, user_id: int, session_id: int) -> list[dict[str, st
     return messages
 
 
+@router.get("/sessions")
+def list_sessions(user: CurrentUser, db: DB) -> list[SessionView]:
+    return [
+        SessionView(id=s.id, topic=s.topic, cefr_level=s.cefr_level)
+        for s in db.scalars(select(Session).where(Session.user_id == user.id).order_by(Session.id.desc()))
+    ]
+
+
+@router.get("/sessions/{session_id}/turns")
+def list_turns(session_id: int, user: CurrentUser, db: DB) -> list[dict]:
+    dialogue_context(db, user.id, session_id)
+    return [
+        {"id": t.id, "text": t.learner_text, "reply": t.tutor_text}
+        for t in db.scalars(select(DialogueTurn).where(
+            DialogueTurn.session_id == session_id
+        ).order_by(DialogueTurn.id))
+    ]
+
+
+def reserve_turn(db: DB, user_id: int, session_id: int) -> tuple[list[dict[str, str]], str]:
+    token = str(uuid4())
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    result = db.execute(update(Session).where(
+        Session.id == session_id, Session.user_id == user_id,
+        or_(Session.busy_until.is_(None), Session.busy_until < now),
+    ).values(busy_until=now + timedelta(minutes=5), turn_token=token))
+    if result.rowcount != 1:
+        db.rollback()
+        dialogue_context(db, user_id, session_id)
+        raise HTTPException(409, "Session is processing another turn")
+    db.commit()
+    try:
+        messages = dialogue_context(db, user_id, session_id)
+        db.rollback()
+        return messages, token
+    except Exception:
+        release_turn(db, session_id, token)
+        raise
+
+
+def release_turn(db: DB, session_id: int, token: str) -> None:
+    db.rollback()
+    db.execute(update(Session).where(
+        Session.id == session_id, Session.turn_token == token
+    ).values(busy_until=None, turn_token=None))
+    db.commit()
+
+
 async def chat_events(
     db: DB, session_id: int, text: str, messages: list[dict[str, str]],
     pronunciation_hint: str | None = None,
@@ -70,19 +120,38 @@ async def chat_events(
     if pronunciation_hint:
         learner_message += f"\nAssessment hint: {pronunciation_hint}"
     chunks = []
+    pending = ""
+    words_sent = 0
     started = perf_counter()
+    stream = llm.stream_reply([*messages, {"role": "user", "content": learner_message}])
     try:
-        async for token in llm.stream_reply([*messages, {"role": "user", "content": learner_message}]):
+        async for token in stream:
             if not chunks:
                 logger.info("Talk first token in %.3fs", perf_counter() - started)
-            chunks.append(token)
-            yield {"type": "token", "text": token}
+            pending += token
+            parts = pending.split()
+            complete = parts if pending.endswith((" ", "\n", "\t")) else parts[:-1]
+            pending = "" if pending.endswith((" ", "\n", "\t")) else (parts[-1] if parts else "")
+            allowed = complete[:40 - words_sent]
+            if allowed:
+                text_chunk = (" " if words_sent else "") + " ".join(allowed)
+                chunks.append(text_chunk)
+                words_sent += len(allowed)
+                yield {"type": "token", "text": text_chunk}
+            if words_sent == 40:
+                break
+        if pending and words_sent < 40:
+            text_chunk = (" " if words_sent else "") + pending
+            chunks.append(text_chunk)
+            yield {"type": "token", "text": text_chunk}
         reply = "".join(chunks).strip()
         if not reply:
             raise llm.LLMError("LLM returned an empty reply")
     except llm.LLMError:
         yield {"type": "error", "code": "llm_unavailable"}
         return
+    finally:
+        await stream.aclose()
 
     try:
         await run_in_threadpool(store_turn, db, session_id, text, reply)
@@ -101,11 +170,13 @@ def store_turn(db: DB, session_id: int, text: str, reply: str) -> None:
 
 @router.post("/chat/stream")
 def chat(payload: ChatRequest, user: CurrentUser, db: DB) -> StreamingResponse:
-    messages = dialogue_context(db, user.id, payload.session_id)
-    db.rollback()  # Release the read transaction before waiting for the LLM.
+    messages, token = reserve_turn(db, user.id, payload.session_id)
 
     async def stream():
-        async for event in chat_events(db, payload.session_id, payload.text, messages):
-            yield f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+        try:
+            async for event in chat_events(db, payload.session_id, payload.text, messages):
+                yield f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+        finally:
+            release_turn(db, payload.session_id, token)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})

@@ -34,6 +34,15 @@ Invoke-RestMethod http://localhost:8000/health
 
 ### Backend và phòng Talk
 
+Sau khi cập nhật backend, chạy lại `alembic upgrade head` để thêm dữ liệu chống ghi trùng lượt ôn và trạng thái lượt Talk.
+
+- `POST /reviews` yêu cầu `request_id` dạng UUID. Frontend tạo một UUID cho mỗi lần người học đánh giá thẻ và dùng lại UUID đó khi gửi lại request. Backend trả lại kết quả đã lưu. Dùng cùng UUID cho dữ liệu khác sẽ trả 409.
+- Chọn Again sẽ hẹn ôn lại sau 10 phút. Các mức khác dùng lịch FSRS theo ngày. Dùng `interval_seconds` hoặc `card.due` để hiển thị lịch chính xác.
+- `GET /sessions` và `GET /sessions/{id}/turns` trả các phiên và lịch sử thuộc người dùng hiện tại. Một phiên chỉ xử lý một lượt Talk tại một thời điểm. Request trùng thời gian trả 409 hoặc `session_busy`.
+- Sau sự kiện `transcript`, Talk và chấm phát âm chạy song song. `done` kết thúc phản hồi Talk, `final` trả kết quả chấm và có thể tới sau `done`. Nếu chấm lỗi, backend phát `assessment_unavailable` và vẫn cho Talk hoàn thành.
+- Sự kiện `coaching` chứa `errors` và `hints` do AI service cung cấp, frontend hiển thị khi kết quả chấm tới. Phản hồi Talk được giới hạn tối đa 40 từ bằng bộ lọc streaming.
+- `GET /progress?timezone_name=Asia/Ho_Chi_Minh` trả streak và dữ liệu `daily` theo ngày địa phương. Có thể truyền múi giờ IANA khác, mặc định là Việt Nam.
+
 - Gọi `POST /auth/register` hoặc `POST /auth/login` để lấy JWT. Gửi JWT qua header `Authorization: Bearer <token>` cho API flashcard, Talk và tiến độ.
 - Phòng Talk dạng văn bản dùng `POST /sessions`, sau đó `POST /chat/stream` với `session_id` và `text`. Đọc sự kiện SSE `token`, `done` và `error`.
 - Với audio, gửi các chunk nhị phân vào `/ws/audio`, rồi gửi JSON `{"type":"end","token":"<JWT>","media_type":"audio/webm"}`. Thêm `text` khi có câu mẫu hoặc `session_id` khi cần phản hồi Talk. Giao thức đầy đủ nằm trong `docs/openapi.yaml`.

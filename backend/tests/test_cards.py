@@ -1,3 +1,4 @@
+from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
@@ -48,19 +49,22 @@ def test_flashcard_flow_and_ownership(api):
     card = response.json()
     assert client.get("/cards/due", headers=owner).json() == [card]
     assert client.get("/cards/due", headers=other).json() == []
-    payload = {"card_id": card["id"], "rating": 3}
+    payload = {"card_id": card["id"], "rating": 3, "request_id": str(uuid4())}
     assert client.post("/reviews", headers=other, json=payload).status_code == 404
     assert client.post("/reviews", headers=owner, json={**payload, "rating": 5}).status_code == 422
 
     response = client.post("/reviews", headers=owner, json=payload)
     assert response.status_code == 200
+    assert client.post("/reviews", headers=owner, json=payload).json() == response.json()
+    assert client.post("/reviews", headers=owner, json={**payload, "rating": 2}).status_code == 409
     assert response.json()["interval_days"] == 3
     assert response.json()["card"]["stability"] == pytest.approx(3.173)
     assert client.get("/cards/due", headers=owner).json() == []
 
-    response = client.post("/reviews", headers=owner, json={**payload, "rating": 1})
+    response = client.post("/reviews", headers=owner, json={**payload, "rating": 1, "request_id": str(uuid4())})
     assert response.status_code == 200
     assert response.json()["card"]["stability"] < 3.173
+    assert response.json()["interval_seconds"] == 600
     with Session(engine) as db:
         assert list(db.scalars(select(Review.rating).order_by(Review.id))) == [3, 1]
 
@@ -105,12 +109,12 @@ def test_audio_talk_and_progress(api, monkeypatch):
         socket.send_bytes(b"audio")
         assert socket.receive_json() == {"type": "partial", "received_bytes": 5}
         socket.send_json({"type": "end", "token": owner["Authorization"].split()[1], "session_id": session_id})
-        assert socket.receive_json()["type"] == "final"
-        assert socket.receive_json()["type"] == "token"
-        assert socket.receive_json()["type"] == "token"
-        assert socket.receive_json()["type"] == "done"
+        events = []
+        while not events or events[-1]["type"] != "final":
+            events.append(socket.receive_json())
+        assert events[0]["type"] == "transcript"
+        assert any(event["type"] == "done" for event in events)
     assert speech_paths == ["/transcribe", "/assess"]
-    assert "/ɡ/" in prompts[0][-1]["content"]
 
     payload = {"session_id": session_id, "text": "I went to Hanoi."}
     assert client.post("/chat/stream", headers=other, json=payload).status_code == 404
@@ -118,9 +122,13 @@ def test_audio_talk_and_progress(api, monkeypatch):
     assert response.headers["content-type"].startswith("text/event-stream")
     assert "event: done" in response.text
     assert prompts[1][1] == {"role": "user", "content": "I go yesterday."}
-    assert client.get("/progress", headers=owner).json() == {
-        "attempts": 1, "streak_days": 1, "phoneme_averages": {"ɡ": 50},
-    }
+    progress = client.get("/progress", headers=owner).json()
+    assert progress["attempts"] == 1
+    assert progress["phoneme_averages"] == {"ɡ": 50}
+    assert progress["timezone"] == "Asia/Ho_Chi_Minh"
+    assert progress["daily"][0]["attempts"] == 1
+    assert client.get(f"/sessions/{session_id}/turns", headers=owner).json()[0]["text"] == "I go yesterday."
+    assert client.get(f"/sessions/{session_id}/turns", headers=other).status_code == 404
     assert client.get("/progress", headers=other).json()["attempts"] == 0
     with Session(engine) as db:
         assert len(list(db.scalars(select(DialogueTurn)))) == 2
@@ -132,7 +140,7 @@ def test_incomplete_talk_is_not_saved(api, monkeypatch):
     session_id = client.post("/sessions", headers=headers, json={}).json()["id"]
 
     async def broken_stream(messages):
-        yield "Partial"
+        yield "Partial "
         raise llm.LLMError("Connection lost")
 
     monkeypatch.setattr(llm, "stream_reply", broken_stream)
@@ -144,3 +152,54 @@ def test_incomplete_talk_is_not_saved(api, monkeypatch):
     assert "event: done" not in response.text
     with Session(engine) as db:
         assert db.scalar(select(DialogueTurn)) is None
+
+
+def test_talk_lease_history_and_word_limit(api, monkeypatch):
+    from app.dialogue import reserve_turn, release_turn
+    from app.models import User
+    client, engine = api
+    headers = register(client, "lease@example.com")
+    session_id = client.post("/sessions", headers=headers, json={}).json()["id"]
+    with Session(engine) as db:
+        user_id = db.scalar(select(User.id))
+        _, token = reserve_turn(db, user_id, session_id)
+    payload = {"session_id": session_id, "text": "Hello"}
+    assert client.post("/chat/stream", headers=headers, json=payload).status_code == 409
+    with Session(engine) as db:
+        release_turn(db, session_id, token)
+
+    async def long_reply(messages):
+        for _ in range(60):
+            yield "word "
+    monkeypatch.setattr(llm, "stream_reply", long_reply)
+    response = client.post("/chat/stream", headers=headers, json=payload)
+    assert "event: done" in response.text
+    history = client.get(f"/sessions/{session_id}/turns", headers=headers).json()
+    assert len(history[0]["reply"].split()) == 40
+    assert client.get("/sessions", headers=headers).json()[0]["id"] == session_id
+    assert client.post("/chat/stream", headers=headers, json=payload).status_code == 200
+
+
+def test_assessment_failure_does_not_block_talk(api, monkeypatch):
+    from app.speech import SpeechError
+    client, _ = api
+    headers = register(client, "speech-error@example.com")
+    session_id = client.post("/sessions", headers=headers, json={}).json()["id"]
+    async def broken_assessment(*args):
+        raise SpeechError("unavailable")
+    async def reply(messages):
+        yield "Hello there. "
+    monkeypatch.setattr("app.audio.request_audio", broken_assessment)
+    monkeypatch.setattr(llm, "stream_reply", reply)
+    with client.websocket_connect("/ws/audio") as ws:
+        ws.send_bytes(b"audio")
+        ws.receive_json()
+        ws.send_json({
+            "type": "end", "token": headers["Authorization"].split()[1],
+            "text": "Hello", "session_id": session_id,
+        })
+        events = []
+        while not events or events[-1].get("code") != "assessment_unavailable":
+            events.append(ws.receive_json())
+        assert any(event["type"] == "done" for event in events)
+    assert client.get("/progress", headers=headers).json()["attempts"] == 0

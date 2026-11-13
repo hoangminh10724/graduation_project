@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-from time import perf_counter
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -10,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
 from .auth import DB, user_from_token
-from .dialogue import chat_events, dialogue_context
+from .dialogue import chat_events, reserve_turn, release_turn
 from .progress import store_attempt
 from .speech import SpeechError, request_audio
 
@@ -28,34 +27,45 @@ class AudioEnd(BaseModel):
     session_id: int | None = Field(default=None, gt=0)
 
 
-def prepare_turn(db: DB, payload: AudioEnd) -> tuple[int, list[dict[str, str]]]:
+def prepare_turn(db: DB, payload: AudioEnd) -> tuple[int, list[dict[str, str]], str | None]:
     user_id = user_from_token(db, payload.token).id
-    messages = dialogue_context(db, user_id, payload.session_id) if payload.session_id else []
+    messages, token = reserve_turn(db, user_id, payload.session_id) if payload.session_id else ([], None)
     db.rollback()
-    return user_id, messages
+    return user_id, messages, token
 
 
 async def complete_audio(ws: WebSocket, db: DB, payload: AudioEnd, audio: bytes) -> None:
-    user_id, messages = await run_in_threadpool(prepare_turn, db, payload)
-    started = perf_counter()
-    transcript = payload.text.strip() if payload.text else ""
-    if not transcript:
-        result = await request_audio("/transcribe", audio, payload.media_type)
-        transcript = result["text"]
-    logger.info("Audio transcript ready in %.3fs", perf_counter() - started)
-    assessment_started = perf_counter()
-    assessment = await request_audio("/assess", audio, payload.media_type, transcript)
-    await run_in_threadpool(store_attempt, db, user_id, transcript, assessment)
-    logger.info("Assessment stored in %.3fs", perf_counter() - assessment_started)
-    await ws.send_json({"type": "final", "text": transcript, "assessment": assessment})
-    if payload.session_id is not None:
-        chat_started = perf_counter()
-        phonemes = [phoneme for word in assessment["words"] for phoneme in word["phonemes"]]
-        weakest = min(phonemes, key=lambda phoneme: phoneme["score"], default=None)
-        hint = f"Practice the sound /{weakest['ipa']}/." if weakest and weakest["score"] < 60 else None
-        async for event in chat_events(db, payload.session_id, transcript, messages, hint):
-            await ws.send_json(event)
-        logger.info("Audio Talk turn completed in %.3fs", perf_counter() - chat_started)
+    user_id, messages, token = await run_in_threadpool(prepare_turn, db, payload)
+    assessment_task = None
+    try:
+        transcript = payload.text.strip() if payload.text else ""
+        if not transcript:
+            result = await request_audio("/transcribe", audio, payload.media_type)
+            transcript = result["text"]
+        assessment_task = asyncio.create_task(
+            request_audio("/assess", audio, payload.media_type, transcript)
+        )
+        await ws.send_json({"type": "transcript", "text": transcript})
+        if payload.session_id is not None:
+            async for event in chat_events(db, payload.session_id, transcript, messages):
+                await ws.send_json(event)
+        try:
+            assessment = await assessment_task
+        except SpeechError:
+            await ws.send_json({"type": "error", "code": "assessment_unavailable"})
+            return
+        await run_in_threadpool(store_attempt, db, user_id, transcript, assessment)
+        await ws.send_json({"type": "final", "text": transcript, "assessment": assessment})
+        hints = assessment.get("hints", [])
+        errors = assessment.get("errors", [])
+        if hints or errors:
+            await ws.send_json({"type": "coaching", "hints": hints, "errors": errors})
+    finally:
+        if assessment_task is not None:
+            assessment_task.cancel()
+            await asyncio.gather(assessment_task, return_exceptions=True)
+        if token is not None:
+            await run_in_threadpool(release_turn, db, payload.session_id, token)
 
 
 @router.websocket("/ws/audio")
@@ -97,7 +107,7 @@ async def ws_audio(ws: WebSocket, db: DB):
             try:
                 await complete_audio(ws, db, payload, bytes(buffer))
             except HTTPException as exc:
-                code = {401: "unauthorized", 404: "session_not_found"}.get(exc.status_code, "unavailable")
+                code = {401: "unauthorized", 404: "session_not_found", 409: "session_busy"}.get(exc.status_code, "unavailable")
                 await ws.send_json({"type": "error", "code": code})
             except SpeechError:
                 await ws.send_json({"type": "error", "code": "speech_unavailable"})

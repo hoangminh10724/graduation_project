@@ -1,8 +1,9 @@
 import json
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import select
 
@@ -17,6 +18,8 @@ class ProgressView(BaseModel):
     attempts: int
     streak_days: int
     phoneme_averages: dict[str, float]
+    timezone: str
+    daily: list[dict]
 
 
 def streak(days: set[date], today: date) -> int:
@@ -29,18 +32,27 @@ def streak(days: set[date], today: date) -> int:
 
 
 @router.get("/progress")
-def get_progress(user: CurrentUser, db: DB) -> ProgressView:
+def get_progress(user: CurrentUser, db: DB, timezone_name: str = "Asia/Ho_Chi_Minh") -> ProgressView:
+    try:
+        zone = ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise HTTPException(422, "Unknown timezone") from None
     attempts = db.execute(
-        select(Attempt.created_at, Attempt.detail_json)
+        select(Attempt.created_at, Attempt.detail_json, Attempt.sentence_score)
         .where(Attempt.user_id == user.id).execution_options(yield_per=100)
     )
     sums: dict[str, float] = defaultdict(float)
     counts: dict[str, int] = defaultdict(int)
     days = set()
+    daily = {}
     total = 0
-    for created_at, detail_json in attempts:
+    for created_at, detail_json, sentence_score in attempts:
         total += 1
-        days.add(created_at.date())
+        day = created_at.replace(tzinfo=timezone.utc).astimezone(zone).date()
+        days.add(day)
+        stats = daily.setdefault(day, {"attempts": 0, "score": 0.0, "sums": defaultdict(float), "counts": defaultdict(int)})
+        stats["attempts"] += 1
+        stats["score"] += sentence_score
         try:
             assessment = Assessment.model_validate_json(detail_json)
         except ValidationError:
@@ -49,10 +61,18 @@ def get_progress(user: CurrentUser, db: DB) -> ProgressView:
             for phoneme in word.phonemes:
                 sums[phoneme.ipa] += phoneme.score
                 counts[phoneme.ipa] += 1
+                stats["sums"][phoneme.ipa] += phoneme.score
+                stats["counts"][phoneme.ipa] += 1
     return ProgressView(
         attempts=total,
-        streak_days=streak(days, datetime.now(timezone.utc).date()),
+        streak_days=streak(days, datetime.now(zone).date()),
         phoneme_averages={ipa: round(score / counts[ipa], 2) for ipa, score in sums.items()},
+        timezone=timezone_name,
+        daily=[{
+            "date": day.isoformat(), "attempts": stats["attempts"],
+            "sentence_average": round(stats["score"] / stats["attempts"], 2),
+            "phoneme_averages": {ipa: round(score / stats["counts"][ipa], 2) for ipa, score in stats["sums"].items()},
+        } for day, stats in sorted(daily.items())],
     )
 
 

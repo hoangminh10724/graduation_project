@@ -25,6 +25,8 @@ class Word(BaseModel):
 class Assessment(BaseModel):
     sentence_score: float = Field(ge=0, le=100)
     words: list[Word]
+    errors: list[dict] = Field(default_factory=list)
+    hints: list[str] = Field(default_factory=list)
 
 
 class Transcript(BaseModel):

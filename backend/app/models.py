@@ -23,6 +23,8 @@ class Session(Base):
     topic: Mapped[str] = mapped_column(String(120), default="")
     cefr_level: Mapped[str] = mapped_column(String(2), default="A2")
     started_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    busy_until: Mapped[datetime | None] = mapped_column(DateTime)
+    turn_token: Mapped[str | None] = mapped_column(String(36))
 
 
 class Card(Base):
@@ -51,6 +53,8 @@ class Review(Base):
     card_id: Mapped[int] = mapped_column(ForeignKey("cards.id"))
     rating: Mapped[int] = mapped_column(Integer)  # 1 Again, 2 Hard, 3 Good, 4 Easy
     reviewed_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    request_id: Mapped[str | None] = mapped_column(String(36), unique=True)
+    result_json: Mapped[str | None] = mapped_column(Text)
 
 
 class Attempt(Base):

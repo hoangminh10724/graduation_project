@@ -1,5 +1,7 @@
 # Đánh giá prompt gia sư Talk
 
+Trong thư mục backend, đặt `LLM_BASE_URL`, `LLM_MODEL` và `LLM_API_KEY` nếu cần, rồi chạy `python evaluate_prompts.py`. Script gọi model thật và in JSON cho từng tình huống, gồm số từ và thời gian tới token đầu. Người đánh giá kiểm tra thêm chất lượng sửa lỗi, CEFR và câu hỏi mở. Bộ lọc streaming của API đảm bảo giới hạn 40 từ, còn script đo trực tiếp đầu ra model để đánh giá prompt.
+
 Tạo phiên với chủ đề và CEFR tương ứng, gửi lần lượt từng câu qua `/chat/stream` và chấm nội dung của sự kiện `done`. Với tình huống phát âm, dùng `/ws/audio` có đánh giá âm vị. Ghi model, câu trả lời, số từ và thời gian tới token đầu tiên để có thể chạy lại.
 
 | CEFR | Đầu vào | Kiểm tra |
