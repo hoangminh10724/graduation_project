@@ -11,7 +11,7 @@ def test_initial_migration(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "sqlite://")
     config = Config(Path(__file__).resolve().parents[1] / "alembic.ini")
     engine = get_engine()
-    tables = {"users", "sessions", "cards", "reviews", "attempts"}
+    tables = {"users", "sessions", "cards", "reviews", "attempts", "dialogue_turns"}
     try:
         command.upgrade(config, "head")
         assert tables <= set(inspect(engine).get_table_names())
