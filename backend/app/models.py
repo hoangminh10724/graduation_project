@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, func, false
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -34,6 +34,14 @@ class Session(Base):
     turn_token: Mapped[str | None] = mapped_column(String(36))
 
 
+class Deck(Base):
+    __tablename__ = "decks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(String(1000), default="")
+
+
 class Card(Base):
     """Thẻ ôn tập FSRS."""
     __tablename__ = "cards"
@@ -44,6 +52,9 @@ class Card(Base):
     stability: Mapped[float] = mapped_column(Float, default=0.0)
     difficulty: Mapped[float] = mapped_column(Float, default=0.0)
     due: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    deck_id: Mapped[int | None] = mapped_column(ForeignKey("decks.id", ondelete="SET NULL"))
+    suspended: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    __table_args__ = (Index("ix_cards_user_due", "user_id", "suspended", "due", "id"),)
 
 
 class DialogueTurn(Base):
@@ -62,6 +73,7 @@ class Review(Base):
     reviewed_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     request_id: Mapped[str | None] = mapped_column(String(36), unique=True)
     result_json: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (Index("ix_reviews_card_time", "card_id", "reviewed_at"),)
 
 
 class Attempt(Base):

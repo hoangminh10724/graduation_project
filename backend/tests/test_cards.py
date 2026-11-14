@@ -252,3 +252,63 @@ def test_login_rate_limit_has_retry_header(api):
     response = client.post("/auth/login", json=payload)
     assert response.status_code == 429
     assert 1 <= int(response.headers["Retry-After"]) <= 60
+
+
+def test_deck_card_management_and_review_preview(api):
+    client, engine = api
+    owner = register(client, "cards-owner@example.com")
+    other = register(client, "cards-other@example.com")
+    deck_id = client.post("/decks", headers=owner, json={"name": "Travel"}).json()["id"]
+    assert client.put(f"/decks/{deck_id}", headers=other, json={"name": "Changed"}).status_code == 404
+    assert client.post("/cards", headers=other, json={
+        "front": "bad", "back": "bad", "deck_id": deck_id,
+    }).status_code == 404
+    card = client.post("/cards", headers=owner, json={
+        "front": "Train", "back": "Tàu hỏa", "deck_id": deck_id,
+    }).json()
+    card_id = card["id"]
+    assert client.get(f"/cards/{card_id}", headers=other).status_code == 404
+    assert client.patch(f"/cards/{card_id}", headers=other, json={"suspended": True}).status_code == 404
+    assert client.get("/cards", headers=other).json()["items"] == []
+    assert client.get("/cards?q=train", headers=owner).json()["items"][0]["id"] == card_id
+
+    preview = client.get(f"/cards/{card_id}/schedule", headers=owner).json()
+    assert [item["interval_seconds"] for item in preview["choices"]] == [600, 86400, 259200, 1382400]
+    with Session(engine) as db:
+        assert db.scalar(select(Review)) is None
+    assert client.patch(f"/cards/{card_id}", headers=owner, json={"front": None}).status_code == 422
+    assert client.patch(f"/cards/{card_id}", headers=owner, json={"suspended": True}).status_code == 200
+    assert client.get("/cards/due", headers=owner).json() == []
+    payload = {"card_id": card_id, "rating": 3, "request_id": str(uuid4())}
+    assert client.post("/reviews", headers=owner, json=payload).status_code == 409
+    client.patch(f"/cards/{card_id}", headers=owner, json={"suspended": False})
+    result = client.post("/reviews", headers=owner, json=payload)
+    assert result.status_code == 200
+    assert result.json()["interval_seconds"] == preview["choices"][2]["interval_seconds"]
+    history = client.get(f"/cards/{card_id}/reviews", headers=owner).json()
+    assert history["items"][0]["rating"] == 3
+    assert client.get(f"/cards/{card_id}/reviews", headers=other).status_code == 404
+
+    assert client.delete(f"/decks/{deck_id}", headers=other).status_code == 404
+    assert client.delete(f"/decks/{deck_id}", headers=owner).status_code == 204
+    retained = client.get(f"/cards/{card_id}", headers=owner).json()
+    assert retained["deck_id"] is None
+    assert retained["stability"] == 3.173
+    assert client.delete(f"/cards/{card_id}", headers=other).status_code == 404
+    assert client.delete(f"/cards/{card_id}", headers=owner).status_code == 204
+    with Session(engine) as db:
+        assert db.scalar(select(Review)) is None
+
+
+def test_card_cursor_and_literal_search(api):
+    client, _ = api
+    headers = register(client, "pages@example.com")
+    for front in ("100%", "travel", "plane"):
+        assert client.post("/cards", headers=headers, json={"front": front, "back": front}).status_code == 201
+    first = client.get("/cards?limit=2", headers=headers).json()
+    second = client.get(f"/cards?limit=2&cursor={first['next_cursor']}", headers=headers).json()
+    assert len(first["items"]) == 2 and len(second["items"]) == 1
+    assert second["next_cursor"] is None
+    assert len({card["id"] for card in first["items"] + second["items"]}) == 3
+    assert len(client.get("/cards", headers=headers, params={"q": "%"}).json()["items"]) == 1
+    assert client.get("/cards?limit=10000", headers=headers).status_code == 422

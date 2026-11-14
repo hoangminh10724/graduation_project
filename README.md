@@ -77,7 +77,7 @@ Test: `pytest` trong `backend/` và `ai-service/`.
 
 ### Giới hạn cho bản demo
 
-Sau cập nhật, chạy migration tới `0004_rate_limits`. Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
+Sau cập nhật, chạy `alembic upgrade head` (hiện tại là `0005_card_management`). Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
 
 WebSocket yêu cầu xác thực trước audio, giới hạn 8 MiB/lượt, thời gian thu tối đa 120 giây và xử lý tối đa 180 giây. Token được kiểm tra lại mỗi lượt. Hợp đồng này yêu cầu frontend cập nhật bước xác thực đầu kết nối.
 
@@ -86,5 +86,27 @@ Backend chỉ publish cổng 8000 trên localhost. AI service dùng mạng nội
 ### Tiến độ hoàn thiện backend demo
 
 - Đã bổ sung xác thực đầu WebSocket, hạn thời gian, bộ đếm request dùng chung DB và kiểm tra token giữ khóa tại thời điểm ghi lượt Talk.
-- Đang hoàn thiện quản lý phiên đăng nhập, hồ sơ, khôi phục tài khoản, quản lý flashcard, vòng đời lượt audio/Talk và dashboard.
+- Đã bổ sung bộ thẻ, tìm kiếm/phân trang flashcard, sửa/xóa thẻ, tạm ngừng ôn, xem trước lịch và lịch sử đánh giá.
+- Đang hoàn thiện quản lý phiên đăng nhập, hồ sơ, khôi phục tài khoản, phiên ôn tập, vòng đời lượt audio/Talk và dashboard.
 - Cần nghiệm thu PostgreSQL đồng thời, email, STT/chấm phát âm và LLM thật trước khi chốt bản demo khách hàng.
+
+### Quản lý flashcard và bộ thẻ
+
+Các API sau yêu cầu JWT của chủ sở hữu.
+
+| API | Chức năng |
+|---|---|
+| `POST /decks`, `GET /decks` | Tạo và liệt kê bộ thẻ |
+| `PUT /decks/{id}`, `DELETE /decks/{id}` | Đổi tên/mô tả hoặc xóa bộ thẻ |
+| `POST /cards` | Tạo thẻ, có thể truyền `deck_id` |
+| `GET /cards` | Tìm theo `q`, lọc `deck_id`/`suspended`, phân trang bằng `cursor` và `limit` |
+| `GET /cards/{id}`, `PATCH /cards/{id}`, `DELETE /cards/{id}` | Xem, sửa và xóa thẻ |
+| `GET /cards/{id}/schedule` | Xem trước lịch cho bốn mức đánh giá, không ghi lượt ôn |
+| `GET /cards/{id}/reviews` | Lịch sử ôn mới nhất trước, phân trang bằng `before_id` |
+| `GET /cards/due` | Thẻ đến hạn đang hoạt động, lọc bộ thẻ và giới hạn số lượng |
+
+Danh sách có giới hạn mặc định 50, tối đa 100. Response của danh sách quản lý chứa `items` và `next_cursor`; lịch sử dùng giá trị `next_cursor` làm `before_id` ở lần gọi tiếp. Danh sách thẻ đến hạn giữ response dạng mảng.
+
+Gửi `{"suspended":true}` để tạm ngừng thẻ. Khi bật lại, thẻ tiếp tục dùng lịch đã lưu. Sửa nội dung thẻ giữ thông số FSRS hiện có. Xóa bộ thẻ sẽ chuyển thẻ về trạng thái chưa phân loại, còn xóa một thẻ sẽ xóa cả lịch sử ôn của thẻ đó.
+
+Migration mới giữ lịch ôn của thẻ cũ, gán `deck_id=null` và `suspended=false`. Lịch xem trước được tính tại thời điểm truy vấn và có thể thay đổi nếu người dùng ôn thẻ trước khi gửi đánh giá.
