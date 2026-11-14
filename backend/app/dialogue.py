@@ -17,6 +17,7 @@ from . import llm
 from .auth import CurrentUser, DB
 from .models import DialogueTurn, Session
 from .prompts import coaching_prompt
+from .limits import enforce_limit
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ class ChatRequest(BaseModel):
 
 @router.post("/sessions", status_code=201)
 def create_session(payload: SessionCreate, user: CurrentUser, db: DB) -> SessionView:
+    enforce_limit(db, "sessions", str(user.id), 20)
     session = Session(user_id=user.id, **payload.model_dump())
     db.add(session)
     db.flush()
@@ -114,7 +116,7 @@ def release_turn(db: DB, session_id: int, token: str) -> None:
 
 async def chat_events(
     db: DB, session_id: int, text: str, messages: list[dict[str, str]],
-    pronunciation_hint: str | None = None,
+    turn_token: str, pronunciation_hint: str | None = None,
 ) -> AsyncIterator[dict]:
     learner_message = text
     if pronunciation_hint:
@@ -154,7 +156,10 @@ async def chat_events(
         await stream.aclose()
 
     try:
-        await run_in_threadpool(store_turn, db, session_id, text, reply)
+        await run_in_threadpool(store_turn, db, session_id, text, reply, turn_token)
+    except HTTPException:
+        yield {"type": "error", "code": "turn_expired"}
+        return
     except SQLAlchemyError:
         await run_in_threadpool(db.rollback)
         logger.exception("Failed to store a Talk turn")
@@ -163,20 +168,29 @@ async def chat_events(
     yield {"type": "done", "text": reply}
 
 
-def store_turn(db: DB, session_id: int, text: str, reply: str) -> None:
+def store_turn(db: DB, session_id: int, text: str, reply: str, turn_token: str) -> None:
+    # The conditional write locks the session row through the turn commit.
+    result = db.execute(update(Session).where(
+        Session.id == session_id, Session.turn_token == turn_token,
+        Session.busy_until > datetime.now(timezone.utc).replace(tzinfo=None),
+    ).values(turn_token=turn_token))
+    if result.rowcount != 1:
+        db.rollback()
+        raise HTTPException(409, "Turn reservation expired")
     db.add(DialogueTurn(session_id=session_id, learner_text=text, tutor_text=reply))
     db.commit()
 
 
 @router.post("/chat/stream")
 def chat(payload: ChatRequest, user: CurrentUser, db: DB) -> StreamingResponse:
+    enforce_limit(db, "ai-turn", str(user.id), 20)
     messages, token = reserve_turn(db, user.id, payload.session_id)
 
     async def stream():
         try:
-            async for event in chat_events(db, payload.session_id, payload.text, messages):
+            async for event in chat_events(db, payload.session_id, payload.text, messages, token):
                 yield f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
         finally:
-            release_turn(db, payload.session_id, token)
+            await run_in_threadpool(release_turn, db, payload.session_id, token)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})

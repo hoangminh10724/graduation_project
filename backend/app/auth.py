@@ -4,7 +4,7 @@ from typing import Annotated
 
 import bcrypt
 import jwt
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from .db import get_db
 from .models import User
+from .limits import client_ip, enforce_limit
 
 router = APIRouter(prefix="/auth")
 DB = Annotated[Session, Depends(get_db)]
@@ -80,7 +81,8 @@ CurrentUser = Annotated[User, Depends(current_user)]
 
 
 @router.post("/register", status_code=201)
-def register(credentials: Credentials, db: DB) -> Token:
+def register(credentials: Credentials, db: DB, request: Request) -> Token:
+    enforce_limit(db, "register", client_ip(request), 5)
     secret = jwt_secret()
     user = User(
         email=credentials.email.lower(),
@@ -98,7 +100,9 @@ def register(credentials: Credentials, db: DB) -> Token:
 
 
 @router.post("/login")
-def login(credentials: Credentials, db: DB) -> Token:
+def login(credentials: Credentials, db: DB, request: Request) -> Token:
+    enforce_limit(db, "login-ip", client_ip(request), 30)
+    enforce_limit(db, "login-email", credentials.email.lower(), 10)
     user = db.scalar(select(User).where(User.email == credentials.email.lower()))
     if user is None or not bcrypt.checkpw(credentials.password.encode(), user.password_hash.encode()):
         raise unauthorized()

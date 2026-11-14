@@ -36,10 +36,12 @@ def test_health_when_database_is_unavailable(monkeypatch):
         engine.dispose()
 
 
-def test_ws_audio_counts_bytes(monkeypatch):
-    monkeypatch.setitem(app.dependency_overrides, get_db, lambda: None)
-    with client.websocket_connect("/ws/audio") as ws:
-        ws.send_bytes(b"1234")
-        assert ws.receive_json()["received_bytes"] == 4
-        ws.send_bytes(b"56")
-        assert ws.receive_json()["received_bytes"] == 6
+def test_ws_requires_auth_before_accepting_audio(monkeypatch):
+    from sqlalchemy.orm import Session
+    monkeypatch.setattr("app.audio.enforce_limit", lambda *args: None)
+    with Session() as db:
+        monkeypatch.setitem(app.dependency_overrides, get_db, lambda: db)
+        with client.websocket_connect("/ws/audio") as ws:
+            ws.send_bytes(b"1234")
+            assert ws.receive_json() == {"type": "error", "code": "authentication_required"}
+            assert ws.receive()["code"] == 1008

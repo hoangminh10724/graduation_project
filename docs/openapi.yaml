@@ -59,6 +59,9 @@ paths:
           $ref: '#/components/responses/Token'
         '409':
           description: Email đã đăng ký
+        '429':
+          description: Request budget exceeded. Retry-After contains seconds until
+            the next window.
   /auth/login:
     post:
       summary: Đăng nhập và lấy JWT
@@ -69,6 +72,9 @@ paths:
           $ref: '#/components/responses/Token'
         '401':
           description: Thông tin đăng nhập không hợp lệ
+        '429':
+          description: Request budget exceeded. Retry-After contains seconds until
+            the next window.
   /cards:
     post:
       summary: Tạo thẻ cho người dùng hiện tại
@@ -238,6 +244,9 @@ paths:
                     - A2
                     - B1
                     - B2
+        '429':
+          description: Request budget exceeded. Retry-After contains seconds until
+            the next window.
     get:
       summary: Sessions owned by the current user
       security:
@@ -279,6 +288,9 @@ paths:
           description: Không tìm thấy phiên của người dùng hiện tại
         '409':
           description: Session is processing another turn
+        '429':
+          description: Request budget exceeded. Retry-After contains seconds until
+            the next window.
   /progress:
     get:
       summary: Progress grouped by learner timezone and date
@@ -331,14 +343,17 @@ paths:
   /ws/audio:
     get:
       summary: (backend, WebSocket) Gửi audio, nhận chấm điểm và phản hồi Talk
-      description: Send binary audio chunks up to 8 MiB, then JSON {"type":"end","token":"JWT","media_type":"audio/webm"}.
-        audio/webm and audio/wav are supported. Optional text supplies the reference
-        sentence. Optional session_id enables Talk. partial acknowledges received_bytes.
-        transcript supplies recognized text. Talk emits token and done with text,
-        while assessment runs concurrently. final contains text and assessment and
-        may arrive after done. coaching contains errors and hints from AI service.
-        Assessment failure emits error with code assessment_unavailable without cancelling
-        Talk. Concurrent turns in the same session emit session_busy.
+      description: First send JSON {"type":"auth","token":"JWT"} within 10 seconds
+        and wait for authenticated. Binary audio before authentication is rejected.
+        Then send audio chunks up to 8 MiB per recording and finish with {"type":"end","media_type":"audio/webm"}.
+        A recording has a 120-second absolute deadline and 60-second idle timeout.
+        Processing has a 180-second deadline. An optional token in end must match
+        the authenticated connection. Tokens are revalidated per turn. Optional text
+        supplies a reference sentence. Optional session_id enables Talk. partial acknowledges
+        received_bytes; transcript supplies text. Talk emits token and done, assessment
+        emits final with text and assessment, followed by coaching when hints or errors
+        exist. done may precede final. Errors include authentication_required, unauthorized,
+        session_busy, rate_limited, assessment_unavailable and turn_expired.
       responses:
         '101':
           description: Switching Protocols

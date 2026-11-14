@@ -30,7 +30,7 @@ Invoke-RestMethod http://localhost:8000/health
 
 - Frontend: http://localhost:3000
 - Backend: http://localhost:8000/docs
-- AI service: http://localhost:8001/docs
+- AI service chạy trong mạng Compose, backend truy cập qua http://ai-service:8001.
 
 ### Backend và phòng Talk
 
@@ -45,7 +45,7 @@ Sau khi cập nhật backend, chạy lại `alembic upgrade head` để thêm d�
 
 - Gọi `POST /auth/register` hoặc `POST /auth/login` để lấy JWT. Gửi JWT qua header `Authorization: Bearer <token>` cho API flashcard, Talk và tiến độ.
 - Phòng Talk dạng văn bản dùng `POST /sessions`, sau đó `POST /chat/stream` với `session_id` và `text`. Đọc sự kiện SSE `token`, `done` và `error`.
-- Với audio, gửi các chunk nhị phân vào `/ws/audio`, rồi gửi JSON `{"type":"end","token":"<JWT>","media_type":"audio/webm"}`. Thêm `text` khi có câu mẫu hoặc `session_id` khi cần phản hồi Talk. Giao thức đầy đủ nằm trong `docs/openapi.yaml`.
+- Với audio, gửi `{"type":"auth","token":"<JWT>"}` vào `/ws/audio` trong 10 giây đầu và chờ sự kiện `authenticated`. Sau đó gửi các chunk nhị phân và kết thúc bằng `{"type":"end","media_type":"audio/webm"}`. Thêm `text` khi có câu mẫu hoặc `session_id` khi cần phản hồi Talk. Giao thức đầy đủ nằm trong `docs/openapi.yaml`.
 - AI service hiện trả dữ liệu mẫu cho `/assess`. Dùng câu mẫu `text` để thử đường đi audio và lưu lượt luyện. Luồng tự nhận dạng cần AI service triển khai `POST /transcribe`; backend trả sự kiện `speech_unavailable` nếu endpoint chưa sẵn sàng.
 - Compose mặc định trỏ tới Ollama chạy trên máy host. Chạy `ollama pull qwen2.5:3b` trên host và kiểm tra Ollama đang lắng nghe cổng 11434. Có thể thay `LLM_BASE_URL`, `LLM_MODEL` và `LLM_API_KEY` để dùng endpoint tương thích OpenAI khác.
 - Để chạy Ollama bằng Compose, đặt `LLM_BASE_URL=http://llm:11434/v1`, rồi chạy `docker compose --profile local-llm up -d llm` và `docker compose exec llm ollama pull qwen2.5:3b`. Khởi động lại bằng `docker compose up -d backend` để nạp biến môi trường mới.
@@ -74,3 +74,17 @@ Test: `pytest` trong `backend/` và `ai-service/`.
 - Nhánh: `feat/<phan-he>-<ten>` (ví dụ `feat/ai-gop`), gộp vào `main` qua pull request.
 - Mỗi người chỉ sửa thư mục của mình; thay đổi API phải sửa `docs/openapi.yaml` trước.
 - Không commit dataset, model, audio, `.env` (đã có trong `.gitignore`).
+
+### Giới hạn cho bản demo
+
+Sau cập nhật, chạy migration tới `0004_rate_limits`. Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
+
+WebSocket yêu cầu xác thực trước audio, giới hạn 8 MiB/lượt, thời gian thu tối đa 120 giây và xử lý tối đa 180 giây. Token được kiểm tra lại mỗi lượt. Hợp đồng này yêu cầu frontend cập nhật bước xác thực đầu kết nối.
+
+Backend chỉ publish cổng 8000 trên localhost. AI service dùng mạng nội bộ Compose. Khi chạy sau reverse proxy, cấu hình FORWARDED_ALLOW_IPS của Uvicorn đúng địa chỉ proxy được tin cậy để limiter nhận IP người dùng. Triển khai public cần TLS tại ingress và thử lại HTTPS/WSS.
+
+### Tiến độ hoàn thiện backend demo
+
+- Đã bổ sung xác thực đầu WebSocket, hạn thời gian, bộ đếm request dùng chung DB và kiểm tra token giữ khóa tại thời điểm ghi lượt Talk.
+- Đang hoàn thiện quản lý phiên đăng nhập, hồ sơ, khôi phục tài khoản, quản lý flashcard, vòng đời lượt audio/Talk và dashboard.
+- Cần nghiệm thu PostgreSQL đồng thời, email, STT/chấm phát âm và LLM thật trước khi chốt bản demo khách hàng.

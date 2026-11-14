@@ -16,6 +16,13 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class RateLimit(Base):
+    __tablename__ = "rate_limits"
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    window_start: Mapped[datetime] = mapped_column(DateTime, index=True)
+    hits: Mapped[int] = mapped_column(Integer)
+
+
 class Session(Base):
     __tablename__ = "sessions"
     id: Mapped[int] = mapped_column(primary_key=True)

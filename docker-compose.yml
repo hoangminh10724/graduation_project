@@ -15,8 +15,8 @@ services:
 
   ai-service:
     build: ./ai-service
-    ports:
-      - "8001:8001"
+    expose:
+      - "8001"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8001/health')"]
       interval: 10s
@@ -37,7 +37,7 @@ services:
       ai-service:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health', timeout=5)"]
       interval: 10s

@@ -106,6 +106,8 @@ def test_audio_talk_and_progress(api, monkeypatch):
     monkeypatch.setattr("app.audio.request_audio", fake_audio)
     monkeypatch.setattr("app.llm.stream_reply", fake_llm)
     with client.websocket_connect("/ws/audio") as socket:
+        socket.send_json({"type": "auth", "token": owner["Authorization"].split()[1]})
+        assert socket.receive_json()["type"] == "authenticated"
         socket.send_bytes(b"audio")
         assert socket.receive_json() == {"type": "partial", "received_bytes": 5}
         socket.send_json({"type": "end", "token": owner["Authorization"].split()[1], "session_id": session_id})
@@ -192,6 +194,8 @@ def test_assessment_failure_does_not_block_talk(api, monkeypatch):
     monkeypatch.setattr("app.audio.request_audio", broken_assessment)
     monkeypatch.setattr(llm, "stream_reply", reply)
     with client.websocket_connect("/ws/audio") as ws:
+        ws.send_json({"type": "auth", "token": headers["Authorization"].split()[1]})
+        assert ws.receive_json()["type"] == "authenticated"
         ws.send_bytes(b"audio")
         ws.receive_json()
         ws.send_json({
@@ -203,3 +207,48 @@ def test_assessment_failure_does_not_block_talk(api, monkeypatch):
             events.append(ws.receive_json())
         assert any(event["type"] == "done" for event in events)
     assert client.get("/progress", headers=headers).json()["attempts"] == 0
+
+
+def test_expired_turn_cannot_write_after_new_reservation(api):
+    from datetime import datetime, timedelta, timezone
+    from fastapi import HTTPException
+    from app.dialogue import reserve_turn, release_turn, store_turn
+    from app.models import User, Session as TalkSession
+    client, engine = api
+    headers = register(client, "expired@example.com")
+    session_id = client.post("/sessions", headers=headers, json={}).json()["id"]
+    with Session(engine) as db:
+        user_id = db.scalar(select(User.id))
+        _, old_token = reserve_turn(db, user_id, session_id)
+        db.get(TalkSession, session_id).busy_until = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=1)
+        db.commit()
+        _, new_token = reserve_turn(db, user_id, session_id)
+        with pytest.raises(HTTPException) as error:
+            store_turn(db, session_id, "old", "stale", old_token)
+        assert error.value.status_code == 409
+        release_turn(db, session_id, old_token)
+        assert db.get(TalkSession, session_id).turn_token == new_token
+        store_turn(db, session_id, "new", "valid", new_token)
+        assert list(db.scalars(select(DialogueTurn.tutor_text))) == ["valid"]
+
+
+def test_missing_audio_session_releases_transaction(api):
+    from app.audio import AudioEnd, prepare_turn
+    from fastapi import HTTPException
+    client, engine = api
+    headers = register(client, "transaction@example.com")
+    with Session(engine) as db:
+        payload = AudioEnd(type="end", session_id=999)
+        with pytest.raises(HTTPException):
+            prepare_turn(db, payload, headers["Authorization"].split()[1])
+        assert not db.in_transaction()
+
+
+def test_login_rate_limit_has_retry_header(api):
+    client, _ = api
+    payload = {"email": "absent@example.com", "password": "invalid-pass"}
+    for _ in range(10):
+        assert client.post("/auth/login", json=payload).status_code == 401
+    response = client.post("/auth/login", json=payload)
+    assert response.status_code == 429
+    assert 1 <= int(response.headers["Retry-After"]) <= 60
