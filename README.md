@@ -77,7 +77,7 @@ Test: `pytest` trong `backend/` và `ai-service/`.
 
 ### Giới hạn cho bản demo
 
-Sau cập nhật, chạy `alembic upgrade head` (hiện tại là `0006_accounts`). Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
+Sau cập nhật, chạy `alembic upgrade head` (hiện tại là `0007_attempt_history`). Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
 
 WebSocket yêu cầu xác thực trước audio, giới hạn 8 MiB/lượt, thời gian thu tối đa 120 giây và xử lý tối đa 180 giây. Token được kiểm tra lại mỗi lượt. Hợp đồng này yêu cầu frontend cập nhật bước xác thực đầu kết nối.
 
@@ -88,6 +88,7 @@ Backend chỉ publish cổng 8000 trên localhost. AI service dùng mạng nội
 - Đã bổ sung xác thực đầu WebSocket, hạn thời gian, bộ đếm request dùng chung DB và kiểm tra token giữ khóa tại thời điểm ghi lượt Talk.
 - Đã bổ sung bộ thẻ, tìm kiếm/phân trang flashcard, sửa/xóa thẻ, tạm ngừng ôn, xem trước lịch và lịch sử đánh giá.
 - Đã bổ sung hồ sơ người học, refresh token luân chuyển, danh sách/thu hồi phiên đăng nhập và đổi mật khẩu.
+- Đã bổ sung lịch sử phát âm phân trang, chi tiết điểm/lỗi/gợi ý và liên kết phiên Talk. Lượt mới phân biệt câu mẫu với transcript STT.
 - Đang hoàn thiện khôi phục tài khoản, phiên ôn tập, vòng đời lượt audio/Talk và dashboard.
 - Cần nghiệm thu PostgreSQL đồng thời, email, STT/chấm phát âm và LLM thật trước khi chốt bản demo khách hàng.
 
@@ -130,3 +131,12 @@ Frontend phải gửi refresh tuần tự và thay refresh token ngay sau khi nh
 API tiến độ dùng múi giờ trong hồ sơ khi không truyền timezone_name. Tạo phiên Talk dùng CEFR của hồ sơ khi không truyền cefr_level. Người dùng cũ được gán mặc định Asia/Ho_Chi_Minh, A2 và mục tiêu 10 hoạt động/ngày.
 
 JWT của bản cũ được tiếp nhận tới khi hết hạn hoặc người dùng đổi mật khẩu/đăng xuất toàn bộ. WebSocket kiểm tra token lại mỗi lượt nói; sau khi refresh access token, frontend mở kết nối đã xác thực mới.
+
+### Lịch sử luyện phát âm
+
+- `GET /attempts`: lịch sử mới nhất trước, phân trang bằng `before_id` và `limit` (mặc định 50, tối đa 100). Response gồm `items` và `next_cursor`. Có thể lọc `session_id` và tìm câu chấm bằng `q` (ký tự `%`/`_` được tìm như văn bản).
+- `GET /attempts/{attempt_id}`: chi tiết kết quả, bao gồm điểm từng từ/âm vị, lỗi và gợi ý trong `assessment`. Chỉ chủ sở hữu được xem. Trả 404 khi không tìm thấy lượt của người dùng hiện tại.
+- Sự kiện audio `final` có thêm `attempt_id` sau khi lưu thành công. Sự kiện `transcript` có `text_source=reference` khi dùng câu mẫu hoặc `stt` khi gọi nhận dạng giọng nói.
+- `assessment_text` là câu đã gửi đi chấm. Nếu gửi `text` trong message `end`, backend lưu vào `reference_text` và không gọi STT; `transcript` là null. Nếu không gửi câu mẫu, `transcript` chứa kết quả STT và `reference_text` là null. Luồng Talk hiện cũng sử dụng câu đã gửi đi chấm.
+- Lượt cũ chỉ có câu chấm được giữ nguyên, không suy đoán đó là câu mẫu hay transcript. Trường nguồn và phiên Talk cũ là null. Chi tiết cũ sai định dạng trả `assessment=null`, không tạo điểm hoặc lỗi phát âm thay thế.
+- Thời gian trả về theo UTC. `attempt_id` là mã tra cứu kết quả, chưa thay thế cơ chế chống ghi trùng khi client gửi lại audio.

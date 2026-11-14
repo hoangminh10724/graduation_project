@@ -58,16 +58,21 @@ async def complete_audio(ws: WebSocket, db: DB, payload: AudioEnd, audio: bytes,
     user_id, messages, token = await run_in_threadpool(prepare_turn, db, payload, connection_token)
     assessment_task = None
     try:
-        transcript = payload.text.strip() if payload.text else ""
-        if not transcript:
+        reference_text = (payload.text.strip() if payload.text else "") or None
+        transcript = None
+        if reference_text is None:
             result = await request_audio("/transcribe", audio, payload.media_type)
             transcript = result["text"]
+        assessment_text = reference_text or transcript
         assessment_task = asyncio.create_task(
-            request_audio("/assess", audio, payload.media_type, transcript)
+            request_audio("/assess", audio, payload.media_type, assessment_text)
         )
-        await ws.send_json({"type": "transcript", "text": transcript})
+        await ws.send_json({
+            "type": "transcript", "text": assessment_text,
+            "text_source": "reference" if reference_text else "stt",
+        })
         if payload.session_id is not None:
-            async with aclosing(chat_events(db, payload.session_id, transcript, messages, token)) as events:
+            async with aclosing(chat_events(db, payload.session_id, assessment_text, messages, token)) as events:
                 async for event in events:
                     await ws.send_json(event)
         try:
@@ -75,8 +80,14 @@ async def complete_audio(ws: WebSocket, db: DB, payload: AudioEnd, audio: bytes,
         except SpeechError:
             await ws.send_json({"type": "error", "code": "assessment_unavailable"})
             return
-        await run_in_threadpool(store_attempt, db, user_id, transcript, assessment)
-        await ws.send_json({"type": "final", "text": transcript, "assessment": assessment})
+        attempt_id = await run_in_threadpool(
+            store_attempt, db, user_id, assessment_text, assessment,
+            reference_text, transcript, payload.session_id,
+        )
+        await ws.send_json({
+            "type": "final", "text": assessment_text, "assessment": assessment,
+            "attempt_id": attempt_id,
+        })
         hints = assessment.get("hints", [])
         errors = assessment.get("errors", [])
         if hints or errors:

@@ -5,6 +5,91 @@ info:
   description: Hợp đồng giữa frontend, backend và ai-service. Sửa file này trước khi
     đổi API.
 paths:
+  /attempts:
+    get:
+      summary: List Attempts
+      operationId: list_attempts_attempts_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: before_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0
+          - type: 'null'
+          title: Before Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: q
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            minLength: 1
+            maxLength: 200
+          - type: 'null'
+          title: Q
+      - name: session_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0
+          - type: 'null'
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttemptPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /attempts/{attempt_id}:
+    get:
+      summary: Get Attempt
+      operationId: get_attempt_attempts__attempt_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: attempt_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Attempt Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttemptDetail'
+        '404':
+          description: Không tìm thấy lượt luyện thuộc người dùng
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /health:
     get:
       summary: Kiểm tra trạng thái dịch vụ (backend kiểm tra cả kết nối DB)
@@ -408,10 +493,12 @@ paths:
         Processing has a 180-second deadline. An optional token in end must match
         the authenticated connection. Tokens are revalidated per turn. Optional text
         supplies a reference sentence. Optional session_id enables Talk. partial acknowledges
-        received_bytes; transcript supplies text. Talk emits token and done, assessment
-        emits final with text and assessment, followed by coaching when hints or errors
-        exist. done may precede final. Errors include authentication_required, unauthorized,
-        session_busy, rate_limited, assessment_unavailable and turn_expired.
+        received_bytes; transcript supplies text and text_source (reference or stt).
+        Supplied reference text skips STT; otherwise text comes from transcription.
+        Talk emits token and done, assessment emits final with text, assessment and
+        persisted attempt_id, followed by coaching when hints or errors exist. done
+        may precede final. Errors include authentication_required, unauthorized, session_busy,
+        rate_limited, assessment_unavailable and turn_expired.
       responses:
         '101':
           description: Switching Protocols
@@ -896,43 +983,33 @@ components:
         difficulty:
           type: number
     Assessment:
-      type: object
       properties:
         sentence_score:
           type: number
-          minimum: 0
-          maximum: 100
+          maximum: 100.0
+          minimum: 0.0
+          title: Sentence Score
         words:
-          type: array
           items:
-            type: object
-            properties:
-              word:
-                type: string
-              score:
-                type: number
-              phonemes:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    ipa:
-                      type: string
-                    score:
-                      type: number
-                    start:
-                      type: number
-                    end:
-                      type: number
-        hints:
+            $ref: '#/components/schemas/Word'
           type: array
+          title: Words
+        errors:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Errors
+        hints:
           items:
             type: string
-        errors:
           type: array
-          items:
-            type: object
-            additionalProperties: true
+          title: Hints
+      type: object
+      required:
+      - sentence_score
+      - words
+      title: Assessment
     CardCreate:
       properties:
         front:
@@ -1365,3 +1442,149 @@ components:
       required:
       - refresh_token
       title: RefreshRequest
+    AttemptDetail:
+      properties:
+        id:
+          type: integer
+          title: Id
+        assessment_text:
+          type: string
+          title: Assessment Text
+        reference_text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reference Text
+        transcript:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Transcript
+        session_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Session Id
+        sentence_score:
+          type: number
+          title: Sentence Score
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        assessment:
+          anyOf:
+          - $ref: '#/components/schemas/Assessment'
+          - type: 'null'
+      type: object
+      required:
+      - id
+      - assessment_text
+      - reference_text
+      - transcript
+      - session_id
+      - sentence_score
+      - created_at
+      - assessment
+      title: AttemptDetail
+    AttemptPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/AttemptSummary'
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Next Cursor
+      type: object
+      required:
+      - items
+      - next_cursor
+      title: AttemptPage
+    AttemptSummary:
+      properties:
+        id:
+          type: integer
+          title: Id
+        assessment_text:
+          type: string
+          title: Assessment Text
+        reference_text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reference Text
+        transcript:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Transcript
+        session_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Session Id
+        sentence_score:
+          type: number
+          title: Sentence Score
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - id
+      - assessment_text
+      - reference_text
+      - transcript
+      - session_id
+      - sentence_score
+      - created_at
+      title: AttemptSummary
+    Phoneme:
+      properties:
+        ipa:
+          type: string
+          title: Ipa
+        score:
+          type: number
+          maximum: 100.0
+          minimum: 0.0
+          title: Score
+        start:
+          type: number
+          title: Start
+        end:
+          type: number
+          title: End
+      type: object
+      required:
+      - ipa
+      - score
+      - start
+      - end
+      title: Phoneme
+    Word:
+      properties:
+        word:
+          type: string
+          title: Word
+        score:
+          type: number
+          maximum: 100.0
+          minimum: 0.0
+          title: Score
+        phonemes:
+          items:
+            $ref: '#/components/schemas/Phoneme'
+          type: array
+          title: Phonemes
+      type: object
+      required:
+      - word
+      - score
+      - phonemes
+      title: Word

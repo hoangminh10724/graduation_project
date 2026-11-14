@@ -77,10 +77,20 @@ def get_progress(user: CurrentUser, db: DB, timezone_name: str | None = None) ->
     )
 
 
-def store_attempt(db: DB, user_id: int, text: str, assessment: dict) -> None:
-    db.add(Attempt(
+def store_attempt(
+    db: DB, user_id: int, text: str, assessment: dict,
+    reference_text: str | None = None, transcript: str | None = None,
+    session_id: int | None = None,
+) -> int:
+    assessment = Assessment.model_validate(assessment).model_dump()
+    attempt = Attempt(
         user_id=user_id, text=text, sentence_score=assessment["sentence_score"],
+        reference_text=reference_text, transcript=transcript, session_id=session_id,
         detail_json=json.dumps(assessment, ensure_ascii=False),
         created_at=datetime.now(timezone.utc).replace(tzinfo=None),
-    ))
+    )
+    db.add(attempt)
+    db.flush()
+    attempt_id = attempt.id
     db.commit()
+    return attempt_id
