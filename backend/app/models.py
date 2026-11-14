@@ -14,6 +14,27 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    display_name: Mapped[str] = mapped_column(String(120), server_default="")
+    timezone_name: Mapped[str] = mapped_column(String(80), server_default="Asia/Ho_Chi_Minh")
+    cefr_level: Mapped[str] = mapped_column(String(2), server_default="A2")
+    daily_goal: Mapped[int] = mapped_column(Integer, server_default="10")
+    token_version: Mapped[int] = mapped_column(Integer, server_default="0")
+
+
+class LoginSession(Base):
+    __tablename__ = "login_sessions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    refresh_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    revoked: Mapped[bool] = mapped_column(Boolean, server_default=false())
+
+
+class UsedRefresh(Base):
+    __tablename__ = "used_refresh_tokens"
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("login_sessions.id"), index=True)
 
 
 class RateLimit(Base):

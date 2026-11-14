@@ -26,11 +26,12 @@ LearnerText = Annotated[str, StringConstraints(strip_whitespace=True, min_length
 
 class SessionCreate(BaseModel):
     topic: str = Field(default="", max_length=120)
-    cefr_level: Literal["A2", "B1", "B2"] = "A2"
+    cefr_level: Literal["A2", "B1", "B2"] | None = None
 
 
 class SessionView(SessionCreate):
     id: int
+    cefr_level: str
 
 
 class ChatRequest(BaseModel):
@@ -41,10 +42,11 @@ class ChatRequest(BaseModel):
 @router.post("/sessions", status_code=201)
 def create_session(payload: SessionCreate, user: CurrentUser, db: DB) -> SessionView:
     enforce_limit(db, "sessions", str(user.id), 20)
-    session = Session(user_id=user.id, **payload.model_dump())
+    level = payload.cefr_level or user.cefr_level
+    session = Session(user_id=user.id, topic=payload.topic, cefr_level=level)
     db.add(session)
     db.flush()
-    result = SessionView(id=session.id, **payload.model_dump())
+    result = SessionView(id=session.id, topic=payload.topic, cefr_level=level)
     db.commit()
     return result
 

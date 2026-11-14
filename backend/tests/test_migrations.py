@@ -11,7 +11,10 @@ def test_initial_migration(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "sqlite://")
     config = Config(Path(__file__).resolve().parents[1] / "alembic.ini")
     engine = get_engine()
-    tables = {"users", "sessions", "cards", "reviews", "attempts", "dialogue_turns", "rate_limits", "decks"}
+    tables = {
+        "users", "sessions", "cards", "reviews", "attempts", "dialogue_turns",
+        "rate_limits", "decks", "login_sessions", "used_refresh_tokens",
+    }
     try:
         command.upgrade(config, "0004_rate_limits")
         with engine.begin() as connection:

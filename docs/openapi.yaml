@@ -51,30 +51,60 @@ paths:
                 $ref: '#/components/schemas/Assessment'
   /auth/register:
     post:
-      summary: Đăng ký tài khoản và lấy JWT
+      summary: Register
+      operationId: register_auth_register_post
       requestBody:
-        $ref: '#/components/requestBodies/Credentials'
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+        required: true
       responses:
         '201':
-          $ref: '#/components/responses/Token'
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Token'
         '409':
           description: Email đã đăng ký
         '429':
           description: Request budget exceeded. Retry-After contains seconds until
             the next window.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /auth/login:
     post:
-      summary: Đăng nhập và lấy JWT
+      summary: Login
+      operationId: login_auth_login_post
       requestBody:
-        $ref: '#/components/requestBodies/Credentials'
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+        required: true
       responses:
         '200':
-          $ref: '#/components/responses/Token'
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Token'
         '401':
           description: Thông tin đăng nhập không hợp lệ
         '429':
           description: Request budget exceeded. Retry-After contains seconds until
             the next window.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /cards:
     post:
       summary: Create Card
@@ -262,59 +292,47 @@ paths:
                     maxLength: 5000
   /sessions:
     post:
-      summary: Tạo phiên Talk cho người dùng hiện tại
-      security:
-      - BearerAuth: []
+      summary: Create Session
+      operationId: create_session_sessions_post
       requestBody:
-        required: true
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                topic:
-                  type: string
-                  maxLength: 120
-                  default: ''
-                cefr_level:
-                  type: string
-                  enum:
-                  - A2
-                  - B1
-                  - B2
-                  default: A2
+              $ref: '#/components/schemas/SessionCreate'
+        required: true
       responses:
         '201':
-          description: Phiên Talk vừa tạo
+          description: Successful Response
           content:
             application/json:
               schema:
-                type: object
-                required:
-                - id
-                - topic
-                - cefr_level
-                properties:
-                  id:
-                    type: integer
-                  topic:
-                    type: string
-                  cefr_level:
-                    type: string
-                    enum:
-                    - A2
-                    - B1
-                    - B2
+                $ref: '#/components/schemas/SessionView'
         '429':
           description: Request budget exceeded. Retry-After contains seconds until
             the next window.
-    get:
-      summary: Sessions owned by the current user
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
       security:
-      - BearerAuth: []
+      - HTTPBearer: []
+    get:
+      summary: List Sessions
+      operationId: list_sessions_sessions_get
       responses:
         '200':
-          description: Sessions owned by the current user
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/SessionView'
+                type: array
+                title: Response List Sessions Sessions Get
+      security:
+      - HTTPBearer: []
   /chat/stream:
     post:
       summary: Gửi một lượt Talk dạng văn bản
@@ -354,53 +372,32 @@ paths:
             the next window.
   /progress:
     get:
-      summary: Progress grouped by learner timezone and date
+      summary: Get Progress
+      operationId: get_progress_progress_get
       security:
-      - BearerAuth: []
-      responses:
-        '200':
-          description: Tiến độ người dùng hiện tại
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                - attempts
-                - streak_days
-                - phoneme_averages
-                properties:
-                  attempts:
-                    type: integer
-                  streak_days:
-                    type: integer
-                  phoneme_averages:
-                    type: object
-                    additionalProperties:
-                      type: number
-                  timezone:
-                    type: string
-                  daily:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        date:
-                          type: string
-                          format: date
-                        attempts:
-                          type: integer
-                        sentence_average:
-                          type: number
-                        phoneme_averages:
-                          type: object
-                          additionalProperties:
-                            type: number
+      - HTTPBearer: []
       parameters:
       - name: timezone_name
         in: query
+        required: false
         schema:
-          type: string
-          default: Asia/Ho_Chi_Minh
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Timezone Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProgressView'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /ws/audio:
     get:
       summary: (backend, WebSocket) Gửi audio, nhận chấm điểm và phản hồi Talk
@@ -700,6 +697,135 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /auth/refresh:
+    post:
+      summary: Refresh
+      operationId: refresh_auth_refresh_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Token'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /auth/sessions:
+    get:
+      summary: Login Sessions
+      operationId: login_sessions_auth_sessions_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  additionalProperties: true
+                  type: object
+                type: array
+                title: Response Login Sessions Auth Sessions Get
+      security:
+      - HTTPBearer: []
+  /auth/sessions/{session_id}:
+    delete:
+      summary: Revoke Session
+      operationId: revoke_session_auth_sessions__session_id__delete
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /auth/logout-all:
+    post:
+      summary: Logout All
+      operationId: logout_all_auth_logout_all_post
+      responses:
+        '204':
+          description: Successful Response
+      security:
+      - HTTPBearer: []
+  /auth/password:
+    post:
+      summary: Change Password
+      operationId: change_password_auth_password_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordChange'
+        required: true
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /me:
+    get:
+      summary: Get Profile
+      operationId: get_profile_me_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileView'
+      security:
+      - HTTPBearer: []
+    patch:
+      summary: Edit Profile
+      operationId: edit_profile_me_patch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileEdit'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileView'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
 components:
   securitySchemes:
     BearerAuth:
@@ -1072,13 +1198,14 @@ components:
           title: Topic
           default: ''
         cefr_level:
-          type: string
-          enum:
-          - A2
-          - B1
-          - B2
+          anyOf:
+          - type: string
+            enum:
+            - A2
+            - B1
+            - B2
+          - type: 'null'
           title: Cefr Level
-          default: A2
       type: object
       title: SessionCreate
     SessionView:
@@ -1090,17 +1217,13 @@ components:
           default: ''
         cefr_level:
           type: string
-          enum:
-          - A2
-          - B1
-          - B2
           title: Cefr Level
-          default: A2
         id:
           type: integer
           title: Id
       type: object
       required:
+      - cefr_level
       - id
       title: SessionView
     Token:
@@ -1112,9 +1235,21 @@ components:
           type: string
           title: Token Type
           default: bearer
+        refresh_token:
+          type: string
+          title: Refresh Token
+        expires_in:
+          type: integer
+          title: Expires In
+          default: 900
+        session_id:
+          type: string
+          title: Session Id
       type: object
       required:
       - access_token
+      - refresh_token
+      - session_id
       title: Token
     ValidationError:
       properties:
@@ -1142,3 +1277,91 @@ components:
       - msg
       - type
       title: ValidationError
+    PasswordChange:
+      properties:
+        current_password:
+          type: string
+          maxLength: 72
+          minLength: 1
+          title: Current Password
+        new_password:
+          type: string
+          minLength: 8
+          title: New Password
+      type: object
+      required:
+      - current_password
+      - new_password
+      title: PasswordChange
+    ProfileEdit:
+      properties:
+        display_name:
+          anyOf:
+          - type: string
+            maxLength: 120
+          - type: 'null'
+          title: Display Name
+        timezone_name:
+          anyOf:
+          - type: string
+            maxLength: 80
+          - type: 'null'
+          title: Timezone Name
+        cefr_level:
+          anyOf:
+          - type: string
+            enum:
+            - A2
+            - B1
+            - B2
+          - type: 'null'
+          title: Cefr Level
+        daily_goal:
+          anyOf:
+          - type: integer
+            maximum: 500.0
+            minimum: 1.0
+          - type: 'null'
+          title: Daily Goal
+      type: object
+      title: ProfileEdit
+    ProfileView:
+      properties:
+        id:
+          type: integer
+          title: Id
+        email:
+          type: string
+          title: Email
+        display_name:
+          type: string
+          title: Display Name
+        timezone_name:
+          type: string
+          title: Timezone Name
+        cefr_level:
+          type: string
+          title: Cefr Level
+        daily_goal:
+          type: integer
+          title: Daily Goal
+      type: object
+      required:
+      - id
+      - email
+      - display_name
+      - timezone_name
+      - cefr_level
+      - daily_goal
+      title: ProfileView
+    RefreshRequest:
+      properties:
+        refresh_token:
+          type: string
+          maxLength: 256
+          minLength: 32
+          title: Refresh Token
+      type: object
+      required:
+      - refresh_token
+      title: RefreshRequest

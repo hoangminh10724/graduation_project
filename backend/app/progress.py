@@ -32,7 +32,8 @@ def streak(days: set[date], today: date) -> int:
 
 
 @router.get("/progress")
-def get_progress(user: CurrentUser, db: DB, timezone_name: str = "Asia/Ho_Chi_Minh") -> ProgressView:
+def get_progress(user: CurrentUser, db: DB, timezone_name: str | None = None) -> ProgressView:
+    timezone_name = timezone_name or user.timezone_name
     try:
         zone = ZoneInfo(timezone_name)
     except (ZoneInfoNotFoundError, ValueError):
