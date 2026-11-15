@@ -13,7 +13,7 @@ def test_initial_migration(monkeypatch):
     engine = get_engine()
     tables = {
         "users", "sessions", "cards", "reviews", "attempts", "dialogue_turns",
-        "rate_limits", "decks", "login_sessions", "used_refresh_tokens",
+        "rate_limits", "decks", "login_sessions", "used_refresh_tokens", "ai_requests",
     }
     try:
         command.upgrade(config, "0004_rate_limits")

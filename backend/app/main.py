@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
-from . import attempts, audio, auth, cards, decks, dialogue, profile, progress
+from . import attempts, audio, auth, cards, decks, dialogue, profile, progress, requests
 from .db import DatabaseConfigurationError, get_engine
 
 app = FastAPI(title="WordSpeak backend")
@@ -18,6 +18,7 @@ app.include_router(dialogue.router)
 app.include_router(progress.router)
 app.include_router(audio.router)
 app.include_router(attempts.router)
+app.include_router(requests.router)
 
 app.state.cors_origins = [
     origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")

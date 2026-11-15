@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .models import RateLimit
 
 
-def enforce_limit(db: Session, scope: str, identity: str, maximum: int) -> None:
+def enforce_limit(db: Session, scope: str, identity: str, maximum: int, *, commit: bool = True) -> None:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     window = now.replace(second=0, microsecond=0)
     key = f"{scope}:{sha256(identity.encode()).hexdigest()}:{window:%Y%m%d%H%M}"
@@ -24,7 +24,8 @@ def enforce_limit(db: Session, scope: str, identity: str, maximum: int) -> None:
     try:
         accepted = db.execute(statement).scalar_one_or_none()
         db.execute(delete(RateLimit).where(RateLimit.window_start < window - timedelta(minutes=2)))
-        db.commit()
+        if commit:
+            db.commit()
     except Exception:
         db.rollback()
         raise

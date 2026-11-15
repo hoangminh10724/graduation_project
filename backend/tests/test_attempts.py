@@ -1,3 +1,4 @@
+from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from app.models import Attempt
@@ -10,7 +11,7 @@ def record(client, authorization, text=None, session_id=None):
         assert socket.receive_json()["type"] == "authenticated"
         socket.send_bytes(b"audio")
         assert socket.receive_json()["type"] == "partial"
-        payload = {"type": "end"}
+        payload = {"type": "end", "request_id": str(uuid4())}
         if text is not None:
             payload["text"] = text
         if session_id is not None:

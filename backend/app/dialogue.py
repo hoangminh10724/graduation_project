@@ -1,11 +1,14 @@
 import json
 import logging
+import asyncio
+from contextlib import aclosing
 from collections.abc import AsyncIterator
 from time import perf_counter
 from typing import Annotated, Literal
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
+from anyio import CancelScope
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, StringConstraints
@@ -13,7 +16,7 @@ from sqlalchemy import select, update, or_
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
-from . import llm
+from . import llm, requests
 from .auth import CurrentUser, DB
 from .models import DialogueTurn, Session
 from .prompts import coaching_prompt
@@ -35,6 +38,7 @@ class SessionView(SessionCreate):
 
 
 class ChatRequest(BaseModel):
+    request_id: UUID
     session_id: int = Field(gt=0)
     text: LearnerText
 
@@ -87,7 +91,7 @@ def list_turns(session_id: int, user: CurrentUser, db: DB) -> list[dict]:
     ]
 
 
-def reserve_turn(db: DB, user_id: int, session_id: int) -> tuple[list[dict[str, str]], str]:
+def reserve_turn(db: DB, user_id: int, session_id: int, *, commit: bool = True) -> tuple[list[dict[str, str]], str]:
     token = str(uuid4())
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     result = db.execute(update(Session).where(
@@ -98,13 +102,18 @@ def reserve_turn(db: DB, user_id: int, session_id: int) -> tuple[list[dict[str, 
         db.rollback()
         dialogue_context(db, user_id, session_id)
         raise HTTPException(409, "Session is processing another turn")
-    db.commit()
+    if commit:
+        db.commit()
     try:
         messages = dialogue_context(db, user_id, session_id)
-        db.rollback()
+        if commit:
+            db.rollback()
         return messages, token
     except Exception:
-        release_turn(db, session_id, token)
+        if commit:
+            release_turn(db, session_id, token)
+        else:
+            db.rollback()
         raise
 
 
@@ -119,6 +128,7 @@ def release_turn(db: DB, session_id: int, token: str) -> None:
 async def chat_events(
     db: DB, session_id: int, text: str, messages: list[dict[str, str]],
     turn_token: str, pronunciation_hint: str | None = None,
+    request_record_id: int | None = None, terminal: bool = False,
 ) -> AsyncIterator[dict]:
     learner_message = text
     if pronunciation_hint:
@@ -155,10 +165,11 @@ async def chat_events(
         yield {"type": "error", "code": "llm_unavailable"}
         return
     finally:
-        await stream.aclose()
+        with CancelScope(shield=True):
+            await stream.aclose()
 
     try:
-        await run_in_threadpool(store_turn, db, session_id, text, reply, turn_token)
+        event = await run_in_threadpool(store_turn, db, session_id, text, reply, turn_token, request_record_id, terminal)
     except HTTPException:
         yield {"type": "error", "code": "turn_expired"}
         return
@@ -167,10 +178,13 @@ async def chat_events(
         logger.exception("Failed to store a Talk turn")
         yield {"type": "error", "code": "database_unavailable"}
         return
-    yield {"type": "done", "text": reply}
+    yield event
 
 
-def store_turn(db: DB, session_id: int, text: str, reply: str, turn_token: str) -> None:
+def store_turn(
+    db: DB, session_id: int, text: str, reply: str, turn_token: str,
+    request_record_id: int | None = None, terminal: bool = False,
+) -> dict:
     # The conditional write locks the session row through the turn commit.
     result = db.execute(update(Session).where(
         Session.id == session_id, Session.turn_token == turn_token,
@@ -179,20 +193,55 @@ def store_turn(db: DB, session_id: int, text: str, reply: str, turn_token: str) 
     if result.rowcount != 1:
         db.rollback()
         raise HTTPException(409, "Turn reservation expired")
-    db.add(DialogueTurn(session_id=session_id, learner_text=text, tutor_text=reply))
+    turn = DialogueTurn(session_id=session_id, learner_text=text, tutor_text=reply)
+    db.add(turn)
+    db.flush()
+    event = {"type": "done", "text": reply, "turn_id": turn.id}
+    if request_record_id is not None:
+        event = requests.record_events(db, request_record_id, [event], terminal)[0]
     db.commit()
+    return event
 
 
 @router.post("/chat/stream")
 def chat(payload: ChatRequest, user: CurrentUser, db: DB) -> StreamingResponse:
-    enforce_limit(db, "ai-turn", str(user.id), 20)
-    messages, token = reserve_turn(db, user.id, payload.session_id)
+    try:
+        record_id, replay = requests.claim(db, user.id, payload.request_id, "chat", {
+            "session_id": payload.session_id, "text": payload.text,
+        })
+        if replay is None:
+            enforce_limit(db, "ai-turn", str(user.id), 20, commit=False)
+            messages, token = reserve_turn(db, user.id, payload.session_id, commit=False)
+            db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     async def stream():
-        try:
-            async for event in chat_events(db, payload.session_id, payload.text, messages, token):
+        if replay is not None:
+            for event in requests.replay_events(replay):
                 yield f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+            return
+        try:
+            async with asyncio.timeout(180):
+                async with aclosing(chat_events(
+                    db, payload.session_id, payload.text, messages, token,
+                    request_record_id=record_id, terminal=True,
+                )) as events:
+                    async for event in events:
+                        if event["type"] == "error":
+                            await run_in_threadpool(requests.interrupt, db, record_id, event["code"])
+                        event = {**event, "request_id": str(payload.request_id)}
+                        yield f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except TimeoutError:
+            await run_in_threadpool(requests.interrupt, db, record_id, "request_timeout")
+            event = {"type": "error", "code": "request_timeout", "request_id": str(payload.request_id)}
+            yield f"event: error\ndata: {json.dumps(event)}\n\n"
         finally:
-            await run_in_threadpool(release_turn, db, payload.session_id, token)
+            with CancelScope(shield=True):
+                try:
+                    await run_in_threadpool(requests.interrupt, db, record_id)
+                finally:
+                    await run_in_threadpool(release_turn, db, payload.session_id, token)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})

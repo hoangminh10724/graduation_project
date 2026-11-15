@@ -10,6 +10,7 @@ from sqlalchemy import select
 from .auth import CurrentUser, DB
 from .models import Attempt
 from .speech import Assessment
+from . import requests
 
 router = APIRouter()
 
@@ -81,6 +82,7 @@ def store_attempt(
     db: DB, user_id: int, text: str, assessment: dict,
     reference_text: str | None = None, transcript: str | None = None,
     session_id: int | None = None,
+    request_record_id: int | None = None,
 ) -> int:
     assessment = Assessment.model_validate(assessment).model_dump()
     attempt = Attempt(
@@ -92,5 +94,10 @@ def store_attempt(
     db.add(attempt)
     db.flush()
     attempt_id = attempt.id
+    if request_record_id is not None:
+        events = [{"type": "final", "text": text, "assessment": assessment, "attempt_id": attempt_id}]
+        if assessment["hints"] or assessment["errors"]:
+            events.append({"type": "coaching", "hints": assessment["hints"], "errors": assessment["errors"]})
+        requests.record_events(db, request_record_id, events, terminal=True)
     db.commit()
     return attempt_id

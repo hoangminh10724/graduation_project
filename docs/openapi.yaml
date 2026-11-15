@@ -5,6 +5,35 @@ info:
   description: Hợp đồng giữa frontend, backend và ai-service. Sửa file này trước khi
     đổi API.
 paths:
+  /requests/{request_id}:
+    get:
+      summary: Request Status
+      operationId: request_status_requests__request_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: request_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Request Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestView'
+        '404':
+          description: Không tìm thấy request của người dùng
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /attempts:
     get:
       summary: List Attempts
@@ -424,22 +453,11 @@ paths:
       security:
       - BearerAuth: []
       requestBody:
-        required: true
         content:
           application/json:
             schema:
-              type: object
-              required:
-              - session_id
-              - text
-              properties:
-                session_id:
-                  type: integer
-                  minimum: 1
-                text:
-                  type: string
-                  minLength: 1
-                  maxLength: 5000
+              $ref: '#/components/schemas/ChatRequest'
+        required: true
       responses:
         '200':
           description: SSE gồm token, done hoặc error. Token và done có text, error
@@ -451,10 +469,22 @@ paths:
         '404':
           description: Không tìm thấy phiên của người dùng hiện tại
         '409':
-          description: Session is processing another turn
+          description: Session is processing another turn, request_processing (Retry-After
+            2 seconds), or request_conflict when an ID is reused with different input
         '429':
           description: Request budget exceeded. Retry-After contains seconds until
             the next window.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      description: Required request_id UUID identifies one logical turn. Identical
+        retries replay committed token/done/error events with replayed=true. Each
+        event includes request_id. GET /requests/{request_id} retrieves status and
+        persisted results. Never append replayed reply to partial text from the same
+        request.
   /progress:
     get:
       summary: Get Progress
@@ -488,7 +518,7 @@ paths:
       summary: (backend, WebSocket) Gửi audio, nhận chấm điểm và phản hồi Talk
       description: First send JSON {"type":"auth","token":"JWT"} within 10 seconds
         and wait for authenticated. Binary audio before authentication is rejected.
-        Then send audio chunks up to 8 MiB per recording and finish with {"type":"end","media_type":"audio/webm"}.
+        Then send audio chunks up to 8 MiB per recording and finish with {"type":"end","request_id":"UUID","media_type":"audio/webm"}.
         A recording has a 120-second absolute deadline and 60-second idle timeout.
         Processing has a 180-second deadline. An optional token in end must match
         the authenticated connection. Tokens are revalidated per turn. Optional text
@@ -498,7 +528,17 @@ paths:
         Talk emits token and done, assessment emits final with text, assessment and
         persisted attempt_id, followed by coaching when hints or errors exist. done
         may precede final. Errors include authentication_required, unauthorized, session_busy,
-        rate_limited, assessment_unavailable and turn_expired.
+        rate_limited, assessment_unavailable and turn_expired. request_id is required
+        for every turn and included on turn events. Reuse the same UUID and identical
+        audio bytes, reference text, media_type and session_id when resending. Completed
+        or failed requests replay persisted events with replayed=true without calling
+        AI. A replayed done is preceded by a single token containing the full saved
+        reply; replace partial UI content for that request before consuming the replay.
+        request_processing means the request is still running; request_conflict means
+        the ID was reused with different input. GET /requests/{request_id} returns
+        durable state and committed events without uploading audio again. Interrupted
+        requests are never executed again under the same ID. Failed requests may contain
+        successfully committed Talk or assessment results.
       responses:
         '101':
           description: Switching Protocols
@@ -1125,6 +1165,10 @@ components:
       title: CardView
     ChatRequest:
       properties:
+        request_id:
+          type: string
+          format: uuid
+          title: Request Id
         session_id:
           type: integer
           exclusiveMinimum: 0.0
@@ -1136,6 +1180,7 @@ components:
           title: Text
       type: object
       required:
+      - request_id
       - session_id
       - text
       title: ChatRequest
@@ -1588,3 +1633,45 @@ components:
       - score
       - phonemes
       title: Word
+    RequestView:
+      properties:
+        request_id:
+          type: string
+          format: uuid
+          title: Request Id
+        kind:
+          type: string
+          enum:
+          - chat
+          - audio
+          title: Kind
+        status:
+          type: string
+          enum:
+          - running
+          - completed
+          - failed
+          title: Status
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        deadline:
+          type: string
+          format: date-time
+          title: Deadline
+        events:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Events
+      type: object
+      required:
+      - request_id
+      - kind
+      - status
+      - created_at
+      - deadline
+      - events
+      title: RequestView

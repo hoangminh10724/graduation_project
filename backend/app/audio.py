@@ -4,7 +4,10 @@ import logging
 from typing import Literal
 from time import monotonic
 from contextlib import aclosing
+from hashlib import sha256
+from uuid import UUID
 
+from anyio import CancelScope
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.exc import SQLAlchemyError
@@ -13,8 +16,9 @@ from starlette.concurrency import run_in_threadpool
 from .auth import DB, user_from_token
 from .dialogue import chat_events, reserve_turn, release_turn
 from .progress import store_attempt
-from .speech import SpeechError, request_audio
+from .speech import Assessment, SpeechError, request_audio
 from .limits import enforce_limit
+from . import requests
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -24,6 +28,7 @@ MAX_CONTROL_BYTES = 24 * 1024
 
 class AudioEnd(BaseModel):
     type: Literal["end"]
+    request_id: UUID
     token: str | None = Field(default=None, min_length=1, max_length=4096)
     media_type: Literal["audio/webm", "audio/wav"] = "audio/webm"
     text: str | None = Field(default=None, min_length=1, max_length=5000)
@@ -42,20 +47,33 @@ def authenticate(db: DB, token: str) -> int:
         db.rollback()
 
 
-def prepare_turn(db: DB, payload: AudioEnd, connection_token: str) -> tuple[int, list[dict[str, str]], str | None]:
+def prepare_turn(
+    db: DB, payload: AudioEnd, connection_token: str, audio: bytes = b"",
+) -> tuple[int, list[dict[str, str]], str | None, int, list[dict] | None]:
     try:
         user_id = authenticate(db, connection_token)
         if payload.token is not None and payload.token != connection_token:
             raise HTTPException(401, "Connection identity cannot change")
-        enforce_limit(db, "ai-turn", str(user_id), 20)
-        messages, token = reserve_turn(db, user_id, payload.session_id) if payload.session_id else ([], None)
-        return user_id, messages, token
+        record_id, replay = requests.claim(db, user_id, payload.request_id, "audio", {
+            "audio_sha256": sha256(audio).hexdigest(), "media_type": payload.media_type,
+            "text": (payload.text.strip() if payload.text else "") or None, "session_id": payload.session_id,
+        })
+        if replay is not None:
+            return user_id, [], None, record_id, replay
+        enforce_limit(db, "ai-turn", str(user_id), 20, commit=False)
+        messages, token = reserve_turn(db, user_id, payload.session_id, commit=False) if payload.session_id else ([], None)
+        db.commit()
+        return user_id, messages, token, record_id, None
     finally:
         db.rollback()
 
 
 async def complete_audio(ws: WebSocket, db: DB, payload: AudioEnd, audio: bytes, connection_token: str) -> None:
-    user_id, messages, token = await run_in_threadpool(prepare_turn, db, payload, connection_token)
+    user_id, messages, token, record_id, replay = await run_in_threadpool(prepare_turn, db, payload, connection_token, audio)
+    if replay is not None:
+        for event in requests.replay_events(replay):
+            await ws.send_json(event)
+        return
     assessment_task = None
     try:
         reference_text = (payload.text.strip() if payload.text else "") or None
@@ -67,37 +85,52 @@ async def complete_audio(ws: WebSocket, db: DB, payload: AudioEnd, audio: bytes,
         assessment_task = asyncio.create_task(
             request_audio("/assess", audio, payload.media_type, assessment_text)
         )
-        await ws.send_json({
+        transcript_event = {
             "type": "transcript", "text": assessment_text,
             "text_source": "reference" if reference_text else "stt",
-        })
+        }
+        saved = await run_in_threadpool(requests.persist_events, db, record_id, [transcript_event])
+        await ws.send_json(saved[0])
         if payload.session_id is not None:
-            async with aclosing(chat_events(db, payload.session_id, assessment_text, messages, token)) as events:
+            async with aclosing(chat_events(
+                db, payload.session_id, assessment_text, messages, token, request_record_id=record_id,
+            )) as events:
                 async for event in events:
-                    await ws.send_json(event)
+                    if event["type"] == "error":
+                        await run_in_threadpool(requests.persist_events, db, record_id, [event])
+                    await ws.send_json({**event, "request_id": str(payload.request_id)})
         try:
             assessment = await assessment_task
         except SpeechError:
-            await ws.send_json({"type": "error", "code": "assessment_unavailable"})
+            await run_in_threadpool(requests.interrupt, db, record_id, "assessment_unavailable")
+            await ws.send_json({"type": "error", "code": "assessment_unavailable", "request_id": str(payload.request_id)})
             return
+        assessment = Assessment.model_validate(assessment).model_dump()
         attempt_id = await run_in_threadpool(
             store_attempt, db, user_id, assessment_text, assessment,
-            reference_text, transcript, payload.session_id,
+            reference_text, transcript, payload.session_id, record_id,
         )
         await ws.send_json({
             "type": "final", "text": assessment_text, "assessment": assessment,
-            "attempt_id": attempt_id,
+            "attempt_id": attempt_id, "request_id": str(payload.request_id),
         })
         hints = assessment.get("hints", [])
         errors = assessment.get("errors", [])
         if hints or errors:
-            await ws.send_json({"type": "coaching", "hints": hints, "errors": errors})
+            await ws.send_json({"type": "coaching", "hints": hints, "errors": errors, "request_id": str(payload.request_id)})
+    except SpeechError:
+        await run_in_threadpool(requests.interrupt, db, record_id, "speech_unavailable")
+        raise
     finally:
-        if assessment_task is not None:
-            assessment_task.cancel()
-            await asyncio.gather(assessment_task, return_exceptions=True)
-        if token is not None:
-            await run_in_threadpool(release_turn, db, payload.session_id, token)
+        with CancelScope(shield=True):
+            if assessment_task is not None:
+                assessment_task.cancel()
+                await asyncio.gather(assessment_task, return_exceptions=True)
+            try:
+                await run_in_threadpool(requests.interrupt, db, record_id)
+            finally:
+                if token is not None:
+                    await run_in_threadpool(release_turn, db, payload.session_id, token)
 
 
 @router.websocket("/ws/audio")
@@ -153,16 +186,18 @@ async def ws_audio(ws: WebSocket, db: DB):
                     await complete_audio(ws, db, payload, bytes(buffer), auth.token)
             except HTTPException as exc:
                 code = {401: "unauthorized", 404: "session_not_found", 409: "session_busy", 429: "rate_limited"}.get(exc.status_code, "unavailable")
-                await ws.send_json({"type": "error", "code": code})
+                if exc.detail in ("request_conflict", "request_processing", "request_expired"):
+                    code = exc.detail
+                await ws.send_json({"type": "error", "code": code, "request_id": str(payload.request_id)})
                 if exc.status_code == 401:
                     await ws.close(code=1008)
                     return
             except SpeechError:
-                await ws.send_json({"type": "error", "code": "speech_unavailable"})
+                await ws.send_json({"type": "error", "code": "speech_unavailable", "request_id": str(payload.request_id)})
             except SQLAlchemyError:
                 await run_in_threadpool(db.rollback)
                 logger.exception("Failed to process a Talk audio turn")
-                await ws.send_json({"type": "error", "code": "database_unavailable"})
+                await ws.send_json({"type": "error", "code": "database_unavailable", "request_id": str(payload.request_id)})
             finally:
                 buffer.clear()
                 recording_started = None
@@ -178,4 +213,5 @@ async def ws_audio(ws: WebSocket, db: DB):
     except WebSocketDisconnect:
         return
     finally:
-        await run_in_threadpool(db.rollback)
+        with CancelScope(shield=True):
+            await run_in_threadpool(db.rollback)

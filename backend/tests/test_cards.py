@@ -110,7 +110,7 @@ def test_audio_talk_and_progress(api, monkeypatch):
         assert socket.receive_json()["type"] == "authenticated"
         socket.send_bytes(b"audio")
         assert socket.receive_json() == {"type": "partial", "received_bytes": 5}
-        socket.send_json({"type": "end", "token": owner["Authorization"].split()[1], "session_id": session_id})
+        socket.send_json({"type": "end", "request_id": str(uuid4()), "token": owner["Authorization"].split()[1], "session_id": session_id})
         events = []
         while not events or events[-1]["type"] != "final":
             events.append(socket.receive_json())
@@ -118,7 +118,7 @@ def test_audio_talk_and_progress(api, monkeypatch):
         assert any(event["type"] == "done" for event in events)
     assert speech_paths == ["/transcribe", "/assess"]
 
-    payload = {"session_id": session_id, "text": "I went to Hanoi."}
+    payload = {"request_id": str(uuid4()), "session_id": session_id, "text": "I went to Hanoi."}
     assert client.post("/chat/stream", headers=other, json=payload).status_code == 404
     response = client.post("/chat/stream", headers=owner, json=payload)
     assert response.headers["content-type"].startswith("text/event-stream")
@@ -147,7 +147,7 @@ def test_incomplete_talk_is_not_saved(api, monkeypatch):
 
     monkeypatch.setattr(llm, "stream_reply", broken_stream)
     response = client.post(
-        "/chat/stream", headers=headers, json={"session_id": session_id, "text": "Hello"}
+        "/chat/stream", headers=headers, json={"request_id": str(uuid4()), "session_id": session_id, "text": "Hello"}
     )
     assert "event: token" in response.text
     assert "event: error" in response.text
@@ -165,7 +165,7 @@ def test_talk_lease_history_and_word_limit(api, monkeypatch):
     with Session(engine) as db:
         user_id = db.scalar(select(User.id))
         _, token = reserve_turn(db, user_id, session_id)
-    payload = {"session_id": session_id, "text": "Hello"}
+    payload = {"request_id": str(uuid4()), "session_id": session_id, "text": "Hello"}
     assert client.post("/chat/stream", headers=headers, json=payload).status_code == 409
     with Session(engine) as db:
         release_turn(db, session_id, token)
@@ -199,7 +199,7 @@ def test_assessment_failure_does_not_block_talk(api, monkeypatch):
         ws.send_bytes(b"audio")
         ws.receive_json()
         ws.send_json({
-            "type": "end", "token": headers["Authorization"].split()[1],
+            "type": "end", "request_id": str(uuid4()), "token": headers["Authorization"].split()[1],
             "text": "Hello", "session_id": session_id,
         })
         events = []
@@ -238,7 +238,7 @@ def test_missing_audio_session_releases_transaction(api):
     client, engine = api
     headers = register(client, "transaction@example.com")
     with Session(engine) as db:
-        payload = AudioEnd(type="end", session_id=999)
+        payload = AudioEnd(type="end", request_id=uuid4(), session_id=999)
         with pytest.raises(HTTPException):
             prepare_turn(db, payload, headers["Authorization"].split()[1])
         assert not db.in_transaction()

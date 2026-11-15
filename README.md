@@ -44,8 +44,8 @@ Sau khi cập nhật backend, chạy lại `alembic upgrade head` để thêm d�
 - `GET /progress?timezone_name=Asia/Ho_Chi_Minh` trả streak và dữ liệu `daily` theo ngày địa phương. Có thể truyền múi giờ IANA khác, mặc định là Việt Nam.
 
 - Gọi `POST /auth/register` hoặc `POST /auth/login` để lấy JWT. Gửi JWT qua header `Authorization: Bearer <token>` cho API flashcard, Talk và tiến độ.
-- Phòng Talk dạng văn bản dùng `POST /sessions`, sau đó `POST /chat/stream` với `session_id` và `text`. Đọc sự kiện SSE `token`, `done` và `error`.
-- Với audio, gửi `{"type":"auth","token":"<JWT>"}` vào `/ws/audio` trong 10 giây đầu và chờ sự kiện `authenticated`. Sau đó gửi các chunk nhị phân và kết thúc bằng `{"type":"end","media_type":"audio/webm"}`. Thêm `text` khi có câu mẫu hoặc `session_id` khi cần phản hồi Talk. Giao thức đầy đủ nằm trong `docs/openapi.yaml`.
+- Phòng Talk dạng văn bản dùng `POST /sessions`, sau đó `POST /chat/stream` với `request_id` dạng UUID, `session_id` và `text`. Đọc sự kiện SSE `token`, `done` và `error`.
+- Với audio, gửi `{"type":"auth","token":"<JWT>"}` vào `/ws/audio` trong 10 giây đầu và chờ sự kiện `authenticated`. Sau đó gửi các chunk nhị phân và kết thúc bằng `{"type":"end","request_id":"<UUID>","media_type":"audio/webm"}`. Thêm `text` khi có câu mẫu hoặc `session_id` khi cần phản hồi Talk. Giao thức đầy đủ nằm trong `docs/openapi.yaml`.
 - AI service hiện trả dữ liệu mẫu cho `/assess`. Dùng câu mẫu `text` để thử đường đi audio và lưu lượt luyện. Luồng tự nhận dạng cần AI service triển khai `POST /transcribe`; backend trả sự kiện `speech_unavailable` nếu endpoint chưa sẵn sàng.
 - Compose mặc định trỏ tới Ollama chạy trên máy host. Chạy `ollama pull qwen2.5:3b` trên host và kiểm tra Ollama đang lắng nghe cổng 11434. Có thể thay `LLM_BASE_URL`, `LLM_MODEL` và `LLM_API_KEY` để dùng endpoint tương thích OpenAI khác.
 - Để chạy Ollama bằng Compose, đặt `LLM_BASE_URL=http://llm:11434/v1`, rồi chạy `docker compose --profile local-llm up -d llm` và `docker compose exec llm ollama pull qwen2.5:3b`. Khởi động lại bằng `docker compose up -d backend` để nạp biến môi trường mới.
@@ -77,7 +77,7 @@ Test: `pytest` trong `backend/` và `ai-service/`.
 
 ### Giới hạn cho bản demo
 
-Sau cập nhật, chạy `alembic upgrade head` (hiện tại là `0007_attempt_history`). Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
+Sau cập nhật, chạy `alembic upgrade head` (hiện tại là `0008_ai_requests`). Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
 
 WebSocket yêu cầu xác thực trước audio, giới hạn 8 MiB/lượt, thời gian thu tối đa 120 giây và xử lý tối đa 180 giây. Token được kiểm tra lại mỗi lượt. Hợp đồng này yêu cầu frontend cập nhật bước xác thực đầu kết nối.
 
@@ -89,6 +89,7 @@ Backend chỉ publish cổng 8000 trên localhost. AI service dùng mạng nội
 - Đã bổ sung bộ thẻ, tìm kiếm/phân trang flashcard, sửa/xóa thẻ, tạm ngừng ôn, xem trước lịch và lịch sử đánh giá.
 - Đã bổ sung hồ sơ người học, refresh token luân chuyển, danh sách/thu hồi phiên đăng nhập và đổi mật khẩu.
 - Đã bổ sung lịch sử phát âm phân trang, chi tiết điểm/lỗi/gợi ý và liên kết phiên Talk. Lượt mới phân biệt câu mẫu với transcript STT.
+- Đã bổ sung request_id bắt buộc cho audio/Talk, tra cứu trạng thái và phát lại kết quả đã lưu khi mất phản hồi, không gọi AI lại bằng cùng mã.
 - Đang hoàn thiện khôi phục tài khoản, phiên ôn tập, vòng đời lượt audio/Talk và dashboard.
 - Cần nghiệm thu PostgreSQL đồng thời, email, STT/chấm phát âm và LLM thật trước khi chốt bản demo khách hàng.
 
@@ -139,4 +140,17 @@ JWT của bản cũ được tiếp nhận tới khi hết hạn hoặc người
 - Sự kiện audio `final` có thêm `attempt_id` sau khi lưu thành công. Sự kiện `transcript` có `text_source=reference` khi dùng câu mẫu hoặc `stt` khi gọi nhận dạng giọng nói.
 - `assessment_text` là câu đã gửi đi chấm. Nếu gửi `text` trong message `end`, backend lưu vào `reference_text` và không gọi STT; `transcript` là null. Nếu không gửi câu mẫu, `transcript` chứa kết quả STT và `reference_text` là null. Luồng Talk hiện cũng sử dụng câu đã gửi đi chấm.
 - Lượt cũ chỉ có câu chấm được giữ nguyên, không suy đoán đó là câu mẫu hay transcript. Trường nguồn và phiên Talk cũ là null. Chi tiết cũ sai định dạng trả `assessment=null`, không tạo điểm hoặc lỗi phát âm thay thế.
-- Thời gian trả về theo UTC. `attempt_id` là mã tra cứu kết quả, chưa thay thế cơ chế chống ghi trùng khi client gửi lại audio.
+- Thời gian trả về theo UTC. `attempt_id` là mã tra cứu kết quả; `request_id` do client tạo là mã chống gửi trùng.
+
+### Gửi lại audio/Talk sau gián đoạn
+
+1. FE tạo UUID cho mỗi lượt mới và giữ nguyên `request_id` nếu gửi lại lượt đó. Với audio, phải giữ cùng bytes audio, câu mẫu, định dạng và phiên Talk. Việc chia lại chunk không thay đổi lượt.
+2. `GET /requests/{request_id}` yêu cầu JWT và chỉ trả request của tài khoản hiện tại. Response có `status` (`running`, `completed`, `failed`) và `events` đã lưu. 404 nghĩa là chưa tìm thấy request được chấp nhận cho tài khoản này.
+3. Request đang chạy trả HTTP 409 `request_processing` với `Retry-After: 2`, hoặc sự kiện lỗi WebSocket cùng mã. Chờ rồi tra cứu lại. Dùng lại UUID với nội dung khác trả `request_conflict`.
+4. Request đã kết thúc sẽ phát lại kết quả có `replayed=true`, không gọi STT/LLM/chấm điểm và không tạo thêm lượt luyện. Trước khi hiển thị replay, FE xóa phần text tạm của request đó. Replay Talk gửi một `token` chứa toàn bộ câu trả lời, sau đó `done` với `turn_id` đã lưu.
+5. `done` và `final` được lưu trong cùng transaction với bản ghi hội thoại/lượt luyện. `events` không chứa token tạm. Khi Talk thành công nhưng chấm điểm thất bại (hoặc ngược lại), trạng thái là `failed` và phần kết quả thành công vẫn có thể xem lại.
+6. Mất kết nối/hủy tác vụ trước khi xong đánh dấu `request_interrupted`. Nếu tiến trình bị dừng đột ngột, lần tra cứu hoặc gửi lại sau hạn 4 phút đánh dấu `request_expired`. Worker cũ không được ghi kết quả sau hạn đó. Khóa phiên Talk tự hết hạn sau tối đa 5 phút nếu tiến trình không dọn được.
+
+Request đã được chấp nhận không tự chạy lại dưới cùng UUID, kể cả khi thất bại. Sau khi xem trạng thái và phần kết quả đã lưu, người dùng có thể chủ động tạo lượt mới với UUID mới. Request bị từ chối trước khi chấp nhận do phiên bận, không thuộc quyền sở hữu hoặc hết giới hạn không giữ mã trong DB.
+
+Bộ kiểm thử hiện kiểm tra gửi lại, xung đột nội dung, quyền truy cập, mất phản hồi sau commit, lỗi từng dịch vụ, hủy tác vụ và hai worker tranh cùng mã trên SQLite. Vẫn cần kiểm thử các giao dịch đồng thời trên PostgreSQL thật trước khi nghiệm thu triển khai.

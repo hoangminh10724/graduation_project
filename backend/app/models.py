@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, func, false
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, false
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -42,6 +42,20 @@ class RateLimit(Base):
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     window_start: Mapped[datetime] = mapped_column(DateTime, index=True)
     hits: Mapped[int] = mapped_column(Integer)
+
+
+class AIRequest(Base):
+    __tablename__ = "ai_requests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    request_id: Mapped[str] = mapped_column(String(36))
+    kind: Mapped[str] = mapped_column(String(10))
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(12))
+    events_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    deadline: Mapped[datetime] = mapped_column(DateTime)
+    __table_args__ = (UniqueConstraint("user_id", "request_id", name="uq_ai_requests_user_request"),)
 
 
 class Session(Base):
