@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import select, update
 
 from .auth import CurrentUser, DB
-from .models import Card, Deck
+from .models import Card, Deck, StudySession
 
 router = APIRouter(prefix="/decks")
 
@@ -67,6 +67,7 @@ def edit_deck(deck_id: int, payload: DeckInput, user: CurrentUser, db: DB) -> De
 def delete_deck(deck_id: int, user: CurrentUser, db: DB) -> Response:
     deck = owned_deck(db, user.id, deck_id)
     # Deleting a collection keeps its cards and their review history.
+    db.execute(update(StudySession).where(StudySession.deck_id == deck.id).values(deck_id=None))
     db.execute(update(Card).where(Card.deck_id == deck.id).values(deck_id=None))
     db.delete(deck)
     db.commit()

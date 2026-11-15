@@ -4,12 +4,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from . import fsrs
 from .auth import CurrentUser, DB
-from .models import Card, Deck, Review
+from .models import Card, Deck, Review, StudyItem
+from .study_state import finish_if_empty, owned_study, study_item_for_review
 
 router = APIRouter()
 CardText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=5000)]
@@ -54,12 +55,14 @@ class ReviewCreate(BaseModel):
     request_id: UUID
     card_id: int = Field(gt=0)
     rating: int = Field(strict=True, ge=1, le=4)
+    study_session_id: int | None = Field(default=None, gt=0)
 
 
 class ReviewResult(BaseModel):
     card: CardView
     interval_days: int
     interval_seconds: int
+    study_session_id: int | None = None
 
 
 def utc_now() -> datetime:
@@ -160,6 +163,7 @@ def edit_card(card_id: int, payload: CardEdit, user: CurrentUser, db: DB) -> Car
 def delete_card(card_id: int, user: CurrentUser, db: DB) -> Response:
     card = owned_card(db, user.id, card_id, lock=True)
     db.execute(delete(Review).where(Review.card_id == card.id))
+    db.execute(update(StudyItem).where(StudyItem.card_id == card.id).values(card_id=None))
     db.delete(card)
     db.commit()
     return Response(status_code=204)
@@ -220,6 +224,7 @@ def preview_schedule(card_id: int, user: CurrentUser, db: DB) -> dict:
 
 @router.post("/reviews")
 def review_card(payload: ReviewCreate, user: CurrentUser, db: DB) -> ReviewResult:
+    study = owned_study(db, user.id, payload.study_session_id) if payload.study_session_id is not None else None
     card = db.scalar(
         select(Card).where(Card.id == payload.card_id, Card.user_id == user.id).with_for_update()
     )
@@ -227,29 +232,36 @@ def review_card(payload: ReviewCreate, user: CurrentUser, db: DB) -> ReviewResul
         raise HTTPException(404, "Card not found")
     previous = db.scalar(select(Review).where(Review.request_id == str(payload.request_id)))
     if previous:
-        if previous.card_id != card.id or previous.rating != payload.rating:
+        if previous.card_id != card.id or previous.rating != payload.rating or previous.study_session_id != payload.study_session_id:
             raise HTTPException(409, "Request ID already used for a different review")
         return ReviewResult.model_validate_json(previous.result_json)
     if card.suspended:
         raise HTTPException(409, "Card is suspended")
+    item = study_item_for_review(db, study, card) if study is not None else None
     last = db.scalar(select(func.max(Review.reviewed_at)).where(Review.card_id == card.id))
     now = utc_now()
     updated, interval = scheduled_review(card, last, payload.rating, now)
     card.stability, card.difficulty = updated.stability, updated.difficulty
     card.due = now + interval
     result = ReviewResult(
-        card=card_view(card), interval_days=interval.days, interval_seconds=int(interval.total_seconds())
+        card=card_view(card), interval_days=interval.days, interval_seconds=int(interval.total_seconds()),
+        study_session_id=payload.study_session_id,
     )
     db.add(Review(
         card_id=card.id, rating=payload.rating, reviewed_at=now,
         request_id=str(payload.request_id), result_json=result.model_dump_json(),
+        study_session_id=payload.study_session_id,
     ))
     try:
+        if item is not None:
+            item.state, item.rating, item.reviewed_at = "reviewed", payload.rating, now
+            db.flush()
+            finish_if_empty(db, study)
         db.commit()
     except IntegrityError:
         db.rollback()
         previous = db.scalar(select(Review).where(Review.request_id == str(payload.request_id)))
-        if previous and previous.card_id == payload.card_id and previous.rating == payload.rating:
+        if previous and previous.card_id == payload.card_id and previous.rating == payload.rating and previous.study_session_id == payload.study_session_id:
             return ReviewResult.model_validate_json(previous.result_json)
         raise HTTPException(409, "Conflicting review request") from None
     return result

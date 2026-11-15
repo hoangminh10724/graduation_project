@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, false
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, false, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -132,7 +132,40 @@ class Review(Base):
     reviewed_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     request_id: Mapped[str | None] = mapped_column(String(36), unique=True)
     result_json: Mapped[str | None] = mapped_column(Text)
+    study_session_id: Mapped[int | None] = mapped_column(ForeignKey("study_sessions.id"), index=True)
     __table_args__ = (Index("ix_reviews_card_time", "card_id", "reviewed_at"),)
+
+
+class StudySession(Base):
+    __tablename__ = "study_sessions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    request_id: Mapped[str] = mapped_column(String(36))
+    selection_json: Mapped[str] = mapped_column(Text)
+    deck_id: Mapped[int | None] = mapped_column(ForeignKey("decks.id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(String(12))
+    started_at: Mapped[datetime] = mapped_column(DateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
+    __table_args__ = (
+        UniqueConstraint("user_id", "request_id", name="uq_study_user_request"),
+        Index("ix_study_user_id", "user_id", "id"),
+        Index("uq_study_active_user", "user_id", unique=True,
+              postgresql_where=text("status = 'active'"), sqlite_where=text("status = 'active'")),
+    )
+
+
+class StudyItem(Base):
+    __tablename__ = "study_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    study_session_id: Mapped[int] = mapped_column(ForeignKey("study_sessions.id"))
+    card_id: Mapped[int | None] = mapped_column(ForeignKey("cards.id", ondelete="SET NULL"), index=True)
+    position: Mapped[int] = mapped_column(Integer)
+    expected_due: Mapped[datetime] = mapped_column(DateTime)
+    state: Mapped[str] = mapped_column(String(12))
+    skip_reason: Mapped[str | None] = mapped_column(String(30))
+    rating: Mapped[int | None] = mapped_column(Integer)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    __table_args__ = (UniqueConstraint("study_session_id", "card_id", name="uq_study_item_card"),)
 
 
 class Attempt(Base):

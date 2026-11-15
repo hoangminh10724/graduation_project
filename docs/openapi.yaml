@@ -5,6 +5,137 @@ info:
   description: Hợp đồng giữa frontend, backend và ai-service. Sửa file này trước khi
     đổi API.
 paths:
+  /study-sessions:
+    post:
+      summary: Create Study
+      operationId: create_study_study_sessions_post
+      security:
+      - HTTPBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StudyCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudyDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '409':
+          description: Request ID conflict, another active study session, completed
+            session or card no longer pending.
+    get:
+      summary: List Studies
+      operationId: list_studies_study_sessions_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: before_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0
+          - type: 'null'
+          title: Before Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: Limit
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - enum:
+            - active
+            - completed
+            type: string
+          - type: 'null'
+          title: Status
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudyPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /study-sessions/{study_id}:
+    get:
+      summary: Get Study
+      operationId: get_study_study_sessions__study_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: study_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Study Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudyDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /study-sessions/{study_id}/finish:
+    post:
+      summary: Finish Study
+      operationId: finish_study_study_sessions__study_id__finish_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: study_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Study Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudyDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '409':
+          description: Request ID conflict, another active study session, completed
+            session or card no longer pending.
   /sessions/{session_id}:
     get:
       summary: Get Session
@@ -544,7 +675,8 @@ paths:
         '404':
           description: Không tìm thấy thẻ của người dùng hiện tại
         '409':
-          description: Request ID reused with different input
+          description: Request ID conflict, another active study session, completed
+            session or card no longer pending.
         '422':
           description: Validation Error
           content:
@@ -1532,6 +1664,12 @@ components:
           maximum: 4.0
           minimum: 1.0
           title: Rating
+        study_session_id:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Study Session Id
       type: object
       required:
       - request_id
@@ -1548,6 +1686,11 @@ components:
         interval_seconds:
           type: integer
           title: Interval Seconds
+        study_session_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Study Session Id
       type: object
       required:
       - card
@@ -2064,3 +2207,180 @@ components:
       - text
       - reply
       title: TurnView
+    StudyCreate:
+      properties:
+        request_id:
+          type: string
+          format: uuid
+          title: Request Id
+        deck_id:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Deck Id
+        limit:
+          type: integer
+          maximum: 100.0
+          minimum: 1.0
+          title: Limit
+          default: 20
+      type: object
+      required:
+      - request_id
+      title: StudyCreate
+    StudyDetail:
+      properties:
+        id:
+          type: integer
+          title: Id
+        deck_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Deck Id
+        status:
+          type: string
+          enum:
+          - active
+          - completed
+          title: Status
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        finished_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Finished At
+        elapsed_seconds:
+          type: integer
+          title: Elapsed Seconds
+        selected:
+          type: integer
+          title: Selected
+        reviewed:
+          type: integer
+          title: Reviewed
+        skipped:
+          type: integer
+          title: Skipped
+        remaining:
+          type: integer
+          title: Remaining
+        ratings:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Ratings
+        skipped_reasons:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Skipped Reasons
+        queue:
+          items:
+            $ref: '#/components/schemas/CardView'
+          type: array
+          title: Queue
+      type: object
+      required:
+      - id
+      - deck_id
+      - status
+      - started_at
+      - finished_at
+      - elapsed_seconds
+      - selected
+      - reviewed
+      - skipped
+      - remaining
+      - ratings
+      - skipped_reasons
+      - queue
+      title: StudyDetail
+    StudyPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/StudySummary'
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Next Cursor
+      type: object
+      required:
+      - items
+      - next_cursor
+      title: StudyPage
+    StudySummary:
+      properties:
+        id:
+          type: integer
+          title: Id
+        deck_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Deck Id
+        status:
+          type: string
+          enum:
+          - active
+          - completed
+          title: Status
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        finished_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Finished At
+        elapsed_seconds:
+          type: integer
+          title: Elapsed Seconds
+        selected:
+          type: integer
+          title: Selected
+        reviewed:
+          type: integer
+          title: Reviewed
+        skipped:
+          type: integer
+          title: Skipped
+        remaining:
+          type: integer
+          title: Remaining
+        ratings:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Ratings
+        skipped_reasons:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Skipped Reasons
+      type: object
+      required:
+      - id
+      - deck_id
+      - status
+      - started_at
+      - finished_at
+      - elapsed_seconds
+      - selected
+      - reviewed
+      - skipped
+      - remaining
+      - ratings
+      - skipped_reasons
+      title: StudySummary

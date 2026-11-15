@@ -77,7 +77,7 @@ Test: `pytest` trong `backend/` và `ai-service/`.
 
 ### Giới hạn cho bản demo
 
-Sau cập nhật, chạy `alembic upgrade head` (hiện tại là `0010_talk_management`). Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
+Sau cập nhật, chạy `alembic upgrade head` (hiện tại là `0011_study_sessions`). Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
 
 WebSocket yêu cầu xác thực trước audio, giới hạn 8 MiB/lượt, thời gian thu tối đa 120 giây và xử lý tối đa 180 giây. Token được kiểm tra lại mỗi lượt. Hợp đồng này yêu cầu frontend cập nhật bước xác thực đầu kết nối.
 
@@ -92,7 +92,8 @@ Backend chỉ publish cổng 8000 trên localhost. AI service dùng mạng nội
 - Đã bổ sung request_id bắt buộc cho audio/Talk, tra cứu trạng thái và phát lại kết quả đã lưu khi mất phản hồi, không gọi AI lại bằng cùng mã.
 - Đã bổ sung quên/đặt lại mật khẩu, xác minh email và worker gửi email từ hàng đợi DB có thử lại khi lỗi.
 - Đã bổ sung tiêu đề phiên Talk, tìm kiếm/phân trang phiên và hội thoại, sửa bài học và xóa phiên cùng các bản sao phản hồi.
-- Đang hoàn thiện phiên ôn tập, hủy lượt AI đang xử lý, dashboard và quản lý dữ liệu cá nhân.
+- Đã bổ sung buổi ôn có hàng đợi lưu trong DB, tiếp tục sau tải lại trang, kết thúc sớm và tổng kết đánh giá.
+- Đang hoàn thiện hủy lượt AI đang xử lý, dashboard và quản lý dữ liệu cá nhân.
 - Cần nghiệm thu PostgreSQL đồng thời, email, STT/chấm phát âm và LLM thật trước khi chốt bản demo khách hàng.
 
 ### Quản lý flashcard và bộ thẻ
@@ -202,3 +203,19 @@ FE cần trang `/reset-password` và `/verify-email`. Token nằm trong URL frag
 Đây là thay đổi response của hai API danh sách: FE dùng `response.items` thay cho mảng trực tiếp. Lượt cũ và các trạng thái FSRS không bị thay đổi.
 
 Migration `0010_talk_management` đặt tiêu đề cho phiên cũ và liên kết request cũ qua bản ghi hội thoại/lượt phát âm đã lưu. Các snapshot dở dang không xác định được phiên chỉ giữ lỗi, bỏ transcript tạm và chuyển sang `failed`; bản ghi hội thoại/lượt phát âm đã lưu vẫn còn. Dừng worker/API cũ trước khi chạy migration rồi khởi động phiên bản mới.
+
+### Buổi ôn tập
+
+1. `POST /study-sessions` với `{request_id, deck_id?, limit?}` chọn các thẻ đang đến hạn, không tạm ngừng, ưu tiên thẻ quá hạn lâu nhất. `request_id` là UUID; `limit` mặc định 20, tối đa 100. Mỗi tài khoản chỉ có một buổi đang hoạt động. Request khác khi đang có buổi ôn trả 409 kèm `study_session_id`; gửi lại cùng UUID và cùng lựa chọn trả lại buổi đó.
+2. `GET /study-sessions/{id}` trả tổng kết hiện tại và `queue` để tiếp tục sau tải lại trang. Danh sách chọn lúc bắt đầu được giữ cố định; thẻ mới không tự thêm vào buổi đang học. Nếu không có thẻ phù hợp, buổi ôn hoàn tất ngay với số lượng 0.
+3. Gửi `POST /reviews` như trước, thêm `study_session_id`. Mỗi thẻ trong buổi chỉ được đánh giá một lần. Gửi lại cùng `request_id` của lượt đánh giá trả lại kết quả cũ, kể cả sau khi buổi đã kết thúc. Dùng mã mới để chấm lại một thẻ đã hoàn thành trong cùng buổi trả 409. Thay đổi `study_session_id` nhưng giữ mã đánh giá cũ cũng trả 409.
+4. Buổi ôn tự hoàn tất khi hết thẻ chờ. `POST /study-sessions/{id}/finish` kết thúc sớm, đánh dấu phần còn lại là bỏ qua, không thay đổi lịch ôn. Gọi lại endpoint này giữ nguyên thời gian kết thúc và tổng kết.
+5. `GET /study-sessions` liệt kê tổng kết mới nhất trước với `items`, `next_cursor`, `before_id`, `limit` (mặc định 20, tối đa 100) và bộ lọc `status=active|completed`.
+
+Tổng kết có `selected`, `reviewed`, `skipped`, `remaining`, số lần chọn `again/hard/good/easy`, `skipped_reasons`, thời gian bắt đầu/kết thúc UTC và `elapsed_seconds`. Đây là thời gian từ lúc bắt đầu đến lúc kết thúc, bao gồm thời gian nghỉ, không phải phép đo thời gian học chủ động.
+
+Khi mở lại buổi ôn, thẻ bị xóa, tạm ngừng hoặc đổi lịch (ví dụ được ôn ngoài buổi hiện tại) được bỏ qua với lý do `card_deleted`, `card_suspended` hoặc `schedule_changed`. Thẻ được ôn ngoài buổi không được tính thành lượt hoàn thành của buổi đó. Kết thúc sớm dùng lý do `ended_early`.
+
+FSRS vẫn áp dụng cho từng lượt đánh giá: chọn Again hẹn lại sau 10 phút, thẻ được tính đã đánh giá trong buổi hiện tại và có thể xuất hiện ở buổi mới khi đến hạn. Xóa thẻ vẫn giữ thống kê đánh giá của buổi; xóa bộ thẻ giữ hàng đợi hiện có và đặt `deck_id=null`. Thống kê không giữ nội dung thẻ đã xóa. Migration giữ nguyên các lượt đánh giá cũ với `study_session_id=null`.
+
+Tạo buổi mới giới hạn 20 lần/tài khoản/phút. Bộ kiểm thử có tranh chấp tạo buổi và chấm cùng thẻ từ hai worker trên SQLite; vẫn cần nghiệm thu các giao dịch này trên PostgreSQL.

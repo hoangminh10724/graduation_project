@@ -15,6 +15,7 @@ def test_initial_migration(monkeypatch):
     tables = {
         "users", "sessions", "cards", "reviews", "attempts", "dialogue_turns",
         "rate_limits", "decks", "login_sessions", "used_refresh_tokens", "ai_requests", "account_actions",
+        "study_sessions", "study_items",
     }
     try:
         command.upgrade(config, "0004_rate_limits")
@@ -28,6 +29,7 @@ def test_initial_migration(monkeypatch):
                 "INSERT INTO attempts (id,user_id,text,sentence_score,detail_json) "
                 "VALUES (1,1,'old sentence',72,'{}')"
             ))
+            connection.execute(text("INSERT INTO reviews (id,card_id,rating) VALUES (1,1,3)"))
         command.upgrade(config, "0009_account_recovery")
         with engine.begin() as connection:
             connection.execute(text("INSERT INTO sessions (id,user_id,topic,cefr_level) VALUES (1,1,'Travel','A2')"))
@@ -52,6 +54,8 @@ def test_initial_migration(monkeypatch):
             assert connection.execute(text("SELECT title FROM sessions WHERE id=1")).scalar_one() == "Travel"
             assert connection.execute(text("SELECT session_id FROM ai_requests WHERE id=1")).scalar_one() == 1
             assert "unlinked partial" not in connection.execute(text("SELECT events_json FROM ai_requests WHERE id=2")).scalar_one()
+            old_review = connection.execute(text("SELECT rating,study_session_id FROM reviews WHERE id=1")).one()
+            assert old_review.rating == 3 and old_review.study_session_id is None
         assert tables <= set(inspect(engine).get_table_names())
         command.check(config)
 
