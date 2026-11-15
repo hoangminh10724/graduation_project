@@ -129,7 +129,7 @@ def test_audio_talk_and_progress(api, monkeypatch):
     assert progress["phoneme_averages"] == {"ɡ": 50}
     assert progress["timezone"] == "Asia/Ho_Chi_Minh"
     assert progress["daily"][0]["attempts"] == 1
-    assert client.get(f"/sessions/{session_id}/turns", headers=owner).json()[0]["text"] == "I go yesterday."
+    assert client.get(f"/sessions/{session_id}/turns", headers=owner).json()["items"][-1]["text"] == "I go yesterday."
     assert client.get(f"/sessions/{session_id}/turns", headers=other).status_code == 404
     assert client.get("/progress", headers=other).json()["attempts"] == 0
     with Session(engine) as db:
@@ -177,8 +177,8 @@ def test_talk_lease_history_and_word_limit(api, monkeypatch):
     response = client.post("/chat/stream", headers=headers, json=payload)
     assert "event: done" in response.text
     history = client.get(f"/sessions/{session_id}/turns", headers=headers).json()
-    assert len(history[0]["reply"].split()) == 40
-    assert client.get("/sessions", headers=headers).json()[0]["id"] == session_id
+    assert len(history["items"][0]["reply"].split()) == 40
+    assert client.get("/sessions", headers=headers).json()["items"][0]["id"] == session_id
     assert client.post("/chat/stream", headers=headers, json=payload).status_code == 200
 
 

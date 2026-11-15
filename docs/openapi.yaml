@@ -5,6 +5,94 @@ info:
   description: Hợp đồng giữa frontend, backend và ai-service. Sửa file này trước khi
     đổi API.
 paths:
+  /sessions/{session_id}:
+    get:
+      summary: Get Session
+      operationId: get_session_sessions__session_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionView'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '404':
+          description: Session not found for the current user.
+    patch:
+      summary: Edit Session
+      operationId: edit_session_sessions__session_id__patch
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionEdit'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionView'
+        '409':
+          description: Phiên đang xử lý một lượt Talk
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '404':
+          description: Session not found for the current user.
+    delete:
+      summary: Delete Session
+      operationId: delete_session_sessions__session_id__delete
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Session Id
+      responses:
+        '204':
+          description: Successful Response
+        '409':
+          description: Phiên đang xử lý một lượt Talk
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '404':
+          description: Session not found for the current user.
   /auth/forgot-password:
     post:
       summary: Forgot Password
@@ -498,12 +586,14 @@ paths:
     post:
       summary: Create Session
       operationId: create_session_sessions_post
+      security:
+      - HTTPBearer: []
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/SessionCreate'
-        required: true
       responses:
         '201':
           description: Successful Response
@@ -520,23 +610,53 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-      security:
-      - HTTPBearer: []
     get:
       summary: List Sessions
       operationId: list_sessions_sessions_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: before_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0
+          - type: 'null'
+          title: Before Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: q
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            minLength: 1
+            maxLength: 120
+          - type: 'null'
+          title: Q
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                items:
-                  $ref: '#/components/schemas/SessionView'
-                type: array
-                title: Response List Sessions Sessions Get
-      security:
-      - HTTPBearer: []
+                $ref: '#/components/schemas/SessionPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /chat/stream:
     post:
       summary: Gửi một lượt Talk dạng văn bản
@@ -634,18 +754,50 @@ paths:
           description: Switching Protocols
   /sessions/{session_id}/turns:
     get:
-      summary: Completed turns owned by the current user
+      summary: List Turns
+      operationId: list_turns_sessions__session_id__turns_get
       security:
-      - BearerAuth: []
-      responses:
-        '200':
-          description: Completed turns owned by the current user
+      - HTTPBearer: []
       parameters:
-      - in: path
-        name: session_id
+      - name: session_id
+        in: path
         required: true
         schema:
           type: integer
+          title: Session Id
+      - name: before_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0
+          - type: 'null'
+          title: Before Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 50
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '404':
+          description: Session not found for the current user.
   /cards/{card_id}:
     get:
       summary: Get Card
@@ -1418,6 +1570,13 @@ components:
             - B2
           - type: 'null'
           title: Cefr Level
+        title:
+          anyOf:
+          - type: string
+            maxLength: 120
+            minLength: 1
+          - type: 'null'
+          title: Title
       type: object
       title: SessionCreate
     SessionView:
@@ -1430,13 +1589,26 @@ components:
         cefr_level:
           type: string
           title: Cefr Level
+        title:
+          type: string
+          title: Title
         id:
           type: integer
           title: Id
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        processing:
+          type: boolean
+          title: Processing
       type: object
       required:
       - cefr_level
+      - title
       - id
+      - started_at
+      - processing
       title: SessionView
     Token:
       properties:
@@ -1815,3 +1987,80 @@ components:
       required:
       - email
       title: RecoveryEmail
+    SessionEdit:
+      properties:
+        title:
+          anyOf:
+          - type: string
+            maxLength: 120
+            minLength: 1
+          - type: 'null'
+          title: Title
+        topic:
+          anyOf:
+          - type: string
+            maxLength: 120
+          - type: 'null'
+          title: Topic
+        cefr_level:
+          anyOf:
+          - type: string
+            enum:
+            - A2
+            - B1
+            - B2
+          - type: 'null'
+          title: Cefr Level
+      type: object
+      title: SessionEdit
+    SessionPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/SessionView'
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Next Cursor
+      type: object
+      required:
+      - items
+      - next_cursor
+      title: SessionPage
+    TurnPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/TurnView'
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Next Cursor
+      type: object
+      required:
+      - items
+      - next_cursor
+      title: TurnPage
+    TurnView:
+      properties:
+        id:
+          type: integer
+          title: Id
+        text:
+          type: string
+          title: Text
+        reply:
+          type: string
+          title: Reply
+      type: object
+      required:
+      - id
+      - text
+      - reply
+      title: TurnView

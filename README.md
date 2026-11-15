@@ -38,7 +38,7 @@ Sau khi cập nhật backend, chạy lại `alembic upgrade head` để thêm d�
 
 - `POST /reviews` yêu cầu `request_id` dạng UUID. Frontend tạo một UUID cho mỗi lần người học đánh giá thẻ và dùng lại UUID đó khi gửi lại request. Backend trả lại kết quả đã lưu. Dùng cùng UUID cho dữ liệu khác sẽ trả 409.
 - Chọn Again sẽ hẹn ôn lại sau 10 phút. Các mức khác dùng lịch FSRS theo ngày. Dùng `interval_seconds` hoặc `card.due` để hiển thị lịch chính xác.
-- `GET /sessions` và `GET /sessions/{id}/turns` trả các phiên và lịch sử thuộc người dùng hiện tại. Một phiên chỉ xử lý một lượt Talk tại một thời điểm. Request trùng thời gian trả 409 hoặc `session_busy`.
+- `GET /sessions` và `GET /sessions/{id}/turns` trả `{items, next_cursor}` thuộc người dùng hiện tại, phân trang mới nhất trước bằng `before_id` và `limit`. Một phiên chỉ xử lý một lượt Talk tại một thời điểm. Request trùng thời gian trả 409 hoặc `session_busy`.
 - Sau sự kiện `transcript`, Talk và chấm phát âm chạy song song. `done` kết thúc phản hồi Talk, `final` trả kết quả chấm và có thể tới sau `done`. Nếu chấm lỗi, backend phát `assessment_unavailable` và vẫn cho Talk hoàn thành.
 - Sự kiện `coaching` chứa `errors` và `hints` do AI service cung cấp, frontend hiển thị khi kết quả chấm tới. Phản hồi Talk được giới hạn tối đa 40 từ bằng bộ lọc streaming.
 - `GET /progress?timezone_name=Asia/Ho_Chi_Minh` trả streak và dữ liệu `daily` theo ngày địa phương. Có thể truyền múi giờ IANA khác, mặc định là Việt Nam.
@@ -77,7 +77,7 @@ Test: `pytest` trong `backend/` và `ai-service/`.
 
 ### Giới hạn cho bản demo
 
-Sau cập nhật, chạy `alembic upgrade head` (hiện tại là `0009_account_recovery`). Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
+Sau cập nhật, chạy `alembic upgrade head` (hiện tại là `0010_talk_management`). Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
 
 WebSocket yêu cầu xác thực trước audio, giới hạn 8 MiB/lượt, thời gian thu tối đa 120 giây và xử lý tối đa 180 giây. Token được kiểm tra lại mỗi lượt. Hợp đồng này yêu cầu frontend cập nhật bước xác thực đầu kết nối.
 
@@ -91,7 +91,8 @@ Backend chỉ publish cổng 8000 trên localhost. AI service dùng mạng nội
 - Đã bổ sung lịch sử phát âm phân trang, chi tiết điểm/lỗi/gợi ý và liên kết phiên Talk. Lượt mới phân biệt câu mẫu với transcript STT.
 - Đã bổ sung request_id bắt buộc cho audio/Talk, tra cứu trạng thái và phát lại kết quả đã lưu khi mất phản hồi, không gọi AI lại bằng cùng mã.
 - Đã bổ sung quên/đặt lại mật khẩu, xác minh email và worker gửi email từ hàng đợi DB có thử lại khi lỗi.
-- Đang hoàn thiện phiên ôn tập, quản lý phiên Talk, dashboard và quản lý dữ liệu cá nhân.
+- Đã bổ sung tiêu đề phiên Talk, tìm kiếm/phân trang phiên và hội thoại, sửa bài học và xóa phiên cùng các bản sao phản hồi.
+- Đang hoàn thiện phiên ôn tập, hủy lượt AI đang xử lý, dashboard và quản lý dữ liệu cá nhân.
 - Cần nghiệm thu PostgreSQL đồng thời, email, STT/chấm phát âm và LLM thật trước khi chốt bản demo khách hàng.
 
 ### Quản lý flashcard và bộ thẻ
@@ -189,3 +190,15 @@ Hàng đợi chỉ lưu mã băm token. Worker tái tạo token bằng HMAC vớ
 FE cần trang `/reset-password` và `/verify-email`. Token nằm trong URL fragment `#token=...`; FE đọc, xóa fragment khỏi thanh địa chỉ và gửi token qua body POST tương ứng. Không gọi GET để tiêu thụ token, tránh trình quét link email tự thực hiện thao tác.
 
 Đã kiểm thử gửi thư tới SMTP giả lập trên localhost, thử lại sau lỗi, khôi phục worker bị dừng, token dùng một lần và hai yêu cầu đặt lại mật khẩu đồng thời trên SQLite. Chưa nghiệm thu SMTP nhà cung cấp thật, các trang FE nhận link và PostgreSQL đồng thời.
+
+### Quản lý phiên Talk
+
+- `POST /sessions` nhận thêm `title` tùy chọn. Nếu bỏ trống, tiêu đề lấy từ chủ đề hoặc `New conversation`. Response có `title`, `started_at` (UTC), `processing`, `topic`, `cefr_level` và `id`.
+- `GET /sessions`: trả `items` và `next_cursor`, thứ tự ID giảm dần (phiên tạo mới nhất trước). Có `before_id`, `limit` (mặc định 50, tối đa 100) và `q` tìm trong tiêu đề/chủ đề. `%` và `_` được tìm như ký tự thường.
+- `GET /sessions/{id}`: xem chi tiết phiên của mình. `PATCH /sessions/{id}` cho phép sửa `title`, `topic`, `cefr_level`. Đổi tiêu đề không thay đổi chủ đề gửi tới AI. Khi `processing=true`, chỉ cho phép đổi tiêu đề; sửa chủ đề/CEFR trả 409.
+- `GET /sessions/{id}/turns`: cùng dạng `{items, next_cursor}` và tham số `before_id`, `limit`, trả lượt mới nhất trước. FE cần đảo thứ tự từng trang khi hiển thị hội thoại từ cũ đến mới, rồi chèn các trang cũ lên đầu.
+- `DELETE /sessions/{id}`: trả 204 sau khi xóa phiên và hội thoại. Lượt phát âm vẫn được giữ, với `session_id=null`. Kết quả request gắn với phiên được thay bằng lỗi `session_deleted`, giữ UUID để chống thực hiện lại. Gửi lại request với phiên đã xóa trả 404. Phiên đang xử lý trả 409 và chưa xóa gì.
+
+Đây là thay đổi response của hai API danh sách: FE dùng `response.items` thay cho mảng trực tiếp. Lượt cũ và các trạng thái FSRS không bị thay đổi.
+
+Migration `0010_talk_management` đặt tiêu đề cho phiên cũ và liên kết request cũ qua bản ghi hội thoại/lượt phát âm đã lưu. Các snapshot dở dang không xác định được phiên chỉ giữ lỗi, bỏ transcript tạm và chuyển sang `failed`; bản ghi hội thoại/lượt phát âm đã lưu vẫn còn. Dừng worker/API cũ trước khi chạy migration rồi khởi động phiên bản mới.

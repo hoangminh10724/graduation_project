@@ -13,7 +13,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from .auth import CurrentUser, DB
-from .models import AIRequest
+from .models import AIRequest, Session as TalkSession
 
 router = APIRouter(prefix="/requests")
 
@@ -24,10 +24,19 @@ def utcnow() -> datetime:
 
 def claim(db: Session, user_id: int, request_id: UUID, kind: str, inputs: dict) -> tuple[int, list[dict] | None]:
     """The new claim and session reservation must be committed in one transaction."""
+    session_id = inputs.get("session_id")
+    if session_id is not None:
+        # Lock order matches session deletion and turn commits: session before request.
+        owned = db.scalar(select(TalkSession.id).where(
+            TalkSession.id == session_id, TalkSession.user_id == user_id,
+        ).with_for_update())
+        if owned is None:
+            db.rollback()
+            raise HTTPException(404, "Session not found")
     fingerprint = sha256(json.dumps(inputs, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     insert = sqlite_insert if db.get_bind().dialect.name == "sqlite" else postgres_insert
     statement = insert(AIRequest).values(
-        user_id=user_id, request_id=str(request_id), kind=kind, fingerprint=fingerprint,
+        user_id=user_id, session_id=session_id, request_id=str(request_id), kind=kind, fingerprint=fingerprint,
         status="running", events_json="[]", created_at=utcnow(), deadline=utcnow() + timedelta(minutes=4),
     ).on_conflict_do_nothing(index_elements=[AIRequest.user_id, AIRequest.request_id]).returning(AIRequest.id)
     record_id = db.execute(statement).scalar_one_or_none()

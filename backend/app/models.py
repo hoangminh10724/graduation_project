@@ -69,6 +69,7 @@ class AIRequest(Base):
     __tablename__ = "ai_requests"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    session_id: Mapped[int | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"), index=True)
     request_id: Mapped[str] = mapped_column(String(36))
     kind: Mapped[str] = mapped_column(String(10))
     fingerprint: Mapped[str] = mapped_column(String(64))
@@ -84,10 +85,12 @@ class Session(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     topic: Mapped[str] = mapped_column(String(120), default="")
+    title: Mapped[str] = mapped_column(String(120), server_default="")
     cefr_level: Mapped[str] = mapped_column(String(2), default="A2")
     started_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     busy_until: Mapped[datetime | None] = mapped_column(DateTime)
     turn_token: Mapped[str | None] = mapped_column(String(36))
+    __table_args__ = (Index("ix_sessions_user_id_id", "user_id", "id"),)
 
 
 class Deck(Base):
