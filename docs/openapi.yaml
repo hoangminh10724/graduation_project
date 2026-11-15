@@ -1384,6 +1384,57 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
       security:
       - HTTPBearer: []
+  /dashboard:
+    get:
+      summary: Get Dashboard
+      operationId: get_dashboard_dashboard_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: timezone_name
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Timezone Name
+      - name: date_from
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Date From
+      - name: date_to
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Date To
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardView'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      description: Owned completed learning outcomes by local date, default last 30
+        days, maximum 366 days. Today goal is independent of the selected date range.
+        Pronunciation, Talk and reviews each count as an activity; a successful audio
+        Talk may count twice. Undated legacy Talk turns are excluded and reported
+        separately. Counts reflect retained history and decrease after deletion.
 components:
   securitySchemes:
     BearerAuth:
@@ -2461,3 +2512,123 @@ components:
       - ratings
       - skipped_reasons
       title: StudySummary
+    ActivityCounts:
+      properties:
+        pronunciation:
+          type: integer
+          title: Pronunciation
+          default: 0
+        talk:
+          type: integer
+          title: Talk
+          default: 0
+        reviews:
+          type: integer
+          title: Reviews
+          default: 0
+        total:
+          type: integer
+          title: Total
+          default: 0
+      type: object
+      title: ActivityCounts
+    DailyActivity:
+      properties:
+        pronunciation:
+          type: integer
+          title: Pronunciation
+          default: 0
+        talk:
+          type: integer
+          title: Talk
+          default: 0
+        reviews:
+          type: integer
+          title: Reviews
+          default: 0
+        total:
+          type: integer
+          title: Total
+          default: 0
+        date:
+          type: string
+          format: date
+          title: Date
+      type: object
+      required:
+      - date
+      title: DailyActivity
+    DailyGoal:
+      properties:
+        date:
+          type: string
+          format: date
+          title: Date
+        target:
+          type: integer
+          title: Target
+        completed:
+          type: integer
+          title: Completed
+        remaining:
+          type: integer
+          title: Remaining
+        achieved:
+          type: boolean
+          title: Achieved
+        activities:
+          $ref: '#/components/schemas/ActivityCounts'
+      type: object
+      required:
+      - date
+      - target
+      - completed
+      - remaining
+      - achieved
+      - activities
+      title: DailyGoal
+    DashboardView:
+      properties:
+        timezone:
+          type: string
+          title: Timezone
+        date_from:
+          type: string
+          format: date
+          title: Date From
+        date_to:
+          type: string
+          format: date
+          title: Date To
+        daily:
+          items:
+            $ref: '#/components/schemas/DailyActivity'
+          type: array
+          title: Daily
+        totals:
+          $ref: '#/components/schemas/ActivityCounts'
+        today:
+          $ref: '#/components/schemas/DailyGoal'
+        due_cards:
+          type: integer
+          title: Due Cards
+        active_study_session_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Active Study Session Id
+        undated_talk_turns:
+          type: integer
+          title: Undated Talk Turns
+      type: object
+      required:
+      - timezone
+      - date_from
+      - date_to
+      - daily
+      - totals
+      - today
+      - due_cards
+      - active_study_session_id
+      - undated_talk_turns
+      title: DashboardView

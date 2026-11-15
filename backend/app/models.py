@@ -123,6 +123,7 @@ class DialogueTurn(Base):
     session_id: Mapped[int] = mapped_column(ForeignKey("sessions.id"), index=True)
     learner_text: Mapped[str] = mapped_column(Text)
     tutor_text: Mapped[str] = mapped_column(Text)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Review(Base):

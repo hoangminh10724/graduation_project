@@ -313,7 +313,8 @@ def store_turn(
     if result.rowcount != 1:
         db.rollback()
         raise HTTPException(409, "Turn reservation expired")
-    turn = DialogueTurn(session_id=session_id, learner_text=text, tutor_text=reply)
+    turn = DialogueTurn(session_id=session_id, learner_text=text, tutor_text=reply,
+                        completed_at=datetime.now(timezone.utc).replace(tzinfo=None))
     db.add(turn)
     db.flush()
     event = {"type": "done", "text": reply, "turn_id": turn.id}

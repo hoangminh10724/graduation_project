@@ -79,7 +79,7 @@ Test: `pytest` trong `backend/` và `ai-service/`.
 
 ### Giới hạn cho bản demo
 
-Sau cập nhật, chạy `alembic upgrade head` (hiện tại là `0012_request_cancellation`). Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
+Sau cập nhật, chạy `alembic upgrade head` (hiện tại là `0013_talk_completion_time`). Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
 
 WebSocket yêu cầu xác thực trước audio, giới hạn 8 MiB/lượt, thời gian thu tối đa 120 giây và xử lý tối đa 180 giây. Token được kiểm tra lại mỗi lượt. Hợp đồng này yêu cầu frontend cập nhật bước xác thực đầu kết nối.
 
@@ -96,7 +96,7 @@ Backend chỉ publish cổng 8000 trên localhost. AI service dùng mạng nội
 - Đã bổ sung tiêu đề phiên Talk, tìm kiếm/phân trang phiên và hội thoại, sửa bài học và xóa phiên cùng các bản sao phản hồi.
 - Đã bổ sung buổi ôn có hàng đợi lưu trong DB, tiếp tục sau tải lại trang, kết thúc sớm và tổng kết đánh giá.
 - Đã bổ sung hủy request audio/Talk, đóng luồng AI khi nhận thấy trạng thái hủy và giữ kết quả đã commit.
-- Đang hoàn thiện dashboard và quản lý dữ liệu cá nhân.
+- Đã bổ sung dashboard tổng hợp hoạt động và mục tiêu hôm nay; quản lý dữ liệu cá nhân vẫn cần bổ sung.
 - Cần nghiệm thu PostgreSQL đồng thời, email, STT/chấm phát âm và LLM thật trước khi chốt bản demo khách hàng.
 
 ### Quản lý flashcard và bộ thẻ
@@ -236,3 +236,16 @@ Tạo buổi mới giới hạn 20 lần/tài khoản/phút. Bộ kiểm thử c
 Migration `0012_request_cancellation` lưu mã khóa phiên trên các request mới. Request có từ trước migration không có mã này, nên lệnh hủy không tự giải phóng khóa cũ; khóa sẽ hết hạn theo cơ chế hiện có. Dừng API cũ trước migration và khởi động phiên bản mới để dùng đầy đủ chức năng.
 
 Kiểm thử bao gồm HTTP hủy trong khi WebSocket/SSE đang chạy, hủy ở từng giai đoạn AI, giữ kết quả thành công một phần, hủy cạnh tranh với commit, khóa phiên cũ/mới và timeout khi client đọc chậm. Các dịch vụ AI trong kiểm thử vẫn được giả lập; cần nghiệm thu hủy kết nối với dịch vụ triển khai thật.
+
+### Dashboard học tập tổng hợp
+
+`GET /dashboard` yêu cầu JWT, trả dữ liệu của người dùng hiện tại. Mặc định xem 30 ngày kết thúc hôm nay theo múi giờ hồ sơ. Có thể truyền `timezone_name` và cặp `date_from`/`date_to` (bao gồm cả hai đầu, tối đa 366 ngày).
+
+- `daily` luôn có đủ ngày, gồm `pronunciation`, `talk`, `reviews`, `total`; `totals` cộng các hoạt động trong khoảng được chọn. Ngày chưa học có các số đếm bằng 0. Điểm phát âm và âm cần luyện tiếp tục lấy từ `/progress` với cùng khoảng ngày.
+- Một kết quả phát âm đã lưu, một lượt Talk đã lưu và một lần đánh giá thẻ đã lưu lần lượt là một hoạt động. Audio vừa chấm phát âm vừa có phản hồi Talk tính hai hoạt động. Chỉ phần đã lưu thành công được tính; nhận request, token đang stream, request bị lỗi trước khi lưu hoặc phát lại kết quả không tạo thêm hoạt động.
+- `today` luôn tính hôm nay, kể cả khi bộ lọc chọn lịch sử: mục tiêu hiện tại trong hồ sơ (`target`), số hoạt động hoàn thành (`completed`), số còn lại (`remaining`), trạng thái `achieved` và số đếm từng loại. Vượt mục tiêu vẫn giữ số hoàn thành thật, số còn lại bằng 0. Không áp mục tiêu hiện tại lên các ngày quá khứ.
+- `due_cards` là số thẻ đến hạn ngay lúc truy vấn, không tính thẻ đang tạm ngừng. `active_study_session_id` cho phép FE mở lại buổi đang hoạt động; gọi API chi tiết buổi để cập nhật thẻ đã bị xóa hoặc đổi lịch.
+- Migration `0013_talk_completion_time` thêm thời điểm hoàn thành Talk. Lượt cũ giữ `completed_at=null`, không suy đoán từ ngày tạo phiên. `undated_talk_turns` báo tổng số lượt chưa xác định được ngày, không đưa chúng vào biểu đồ hoặc mục tiêu hôm nay. Dừng API cũ trước migration, sau đó khởi động bản mới.
+- Thống kê phản ánh lịch sử còn được giữ: xóa phiên Talk sẽ giảm số lượt Talk; xóa thẻ và lịch sử ôn sẽ giảm số lượt ôn. Xóa phiên Talk vẫn giữ các lượt phát âm theo hợp đồng hiện có. Các số đếm không phải thời gian học, và không phải bản ghi thành tích bất biến sau khi xóa dữ liệu.
+
+Đã kiểm thử biên ngày Việt Nam, ngày đổi giờ mùa hè, dữ liệu của tài khoản khác, replay, xóa lịch sử và migration giữ nguyên lượt Talk cũ. Vẫn cần nghiệm thu với PostgreSQL và AI triển khai thật.

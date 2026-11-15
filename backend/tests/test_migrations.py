@@ -56,6 +56,7 @@ def test_initial_migration(monkeypatch):
             assert "unlinked partial" not in connection.execute(text("SELECT events_json FROM ai_requests WHERE id=2")).scalar_one()
             old_review = connection.execute(text("SELECT rating,study_session_id FROM reviews WHERE id=1")).one()
             assert old_review.rating == 3 and old_review.study_session_id is None
+            assert connection.execute(text("SELECT completed_at FROM dialogue_turns WHERE id=1")).scalar_one() is None
         assert tables <= set(inspect(engine).get_table_names())
         command.check(config)
 
