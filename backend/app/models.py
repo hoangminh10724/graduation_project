@@ -77,6 +77,7 @@ class AIRequest(Base):
     events_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime)
     deadline: Mapped[datetime] = mapped_column(DateTime)
+    turn_token: Mapped[str | None] = mapped_column(String(36))
     __table_args__ = (UniqueConstraint("user_id", "request_id", name="uq_ai_requests_user_request"),)
 
 

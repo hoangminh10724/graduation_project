@@ -77,7 +77,7 @@ Test: `pytest` trong `backend/` và `ai-service/`.
 
 ### Giới hạn cho bản demo
 
-Sau cập nhật, chạy `alembic upgrade head` (hiện tại là `0011_study_sessions`). Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
+Sau cập nhật, chạy `alembic upgrade head` (hiện tại là `0012_request_cancellation`). Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
 
 WebSocket yêu cầu xác thực trước audio, giới hạn 8 MiB/lượt, thời gian thu tối đa 120 giây và xử lý tối đa 180 giây. Token được kiểm tra lại mỗi lượt. Hợp đồng này yêu cầu frontend cập nhật bước xác thực đầu kết nối.
 
@@ -93,7 +93,8 @@ Backend chỉ publish cổng 8000 trên localhost. AI service dùng mạng nội
 - Đã bổ sung quên/đặt lại mật khẩu, xác minh email và worker gửi email từ hàng đợi DB có thử lại khi lỗi.
 - Đã bổ sung tiêu đề phiên Talk, tìm kiếm/phân trang phiên và hội thoại, sửa bài học và xóa phiên cùng các bản sao phản hồi.
 - Đã bổ sung buổi ôn có hàng đợi lưu trong DB, tiếp tục sau tải lại trang, kết thúc sớm và tổng kết đánh giá.
-- Đang hoàn thiện hủy lượt AI đang xử lý, dashboard và quản lý dữ liệu cá nhân.
+- Đã bổ sung hủy request audio/Talk, đóng luồng AI khi nhận thấy trạng thái hủy và giữ kết quả đã commit.
+- Đang hoàn thiện dashboard và quản lý dữ liệu cá nhân.
 - Cần nghiệm thu PostgreSQL đồng thời, email, STT/chấm phát âm và LLM thật trước khi chốt bản demo khách hàng.
 
 ### Quản lý flashcard và bộ thẻ
@@ -148,13 +149,13 @@ JWT của bản cũ được tiếp nhận tới khi hết hạn hoặc người
 ### Gửi lại audio/Talk sau gián đoạn
 
 1. FE tạo UUID cho mỗi lượt mới và giữ nguyên `request_id` nếu gửi lại lượt đó. Với audio, phải giữ cùng bytes audio, câu mẫu, định dạng và phiên Talk. Việc chia lại chunk không thay đổi lượt.
-2. `GET /requests/{request_id}` yêu cầu JWT và chỉ trả request của tài khoản hiện tại. Response có `status` (`running`, `completed`, `failed`) và `events` đã lưu. 404 nghĩa là chưa tìm thấy request được chấp nhận cho tài khoản này.
+2. `GET /requests/{request_id}` yêu cầu JWT và chỉ trả request của tài khoản hiện tại. Response có `status` (`running`, `completed`, `failed`, `cancelled`) và `events` đã lưu. 404 nghĩa là chưa tìm thấy request được chấp nhận cho tài khoản này.
 3. Request đang chạy trả HTTP 409 `request_processing` với `Retry-After: 2`, hoặc sự kiện lỗi WebSocket cùng mã. Chờ rồi tra cứu lại. Dùng lại UUID với nội dung khác trả `request_conflict`.
 4. Request đã kết thúc sẽ phát lại kết quả có `replayed=true`, không gọi STT/LLM/chấm điểm và không tạo thêm lượt luyện. Trước khi hiển thị replay, FE xóa phần text tạm của request đó. Replay Talk gửi một `token` chứa toàn bộ câu trả lời, sau đó `done` với `turn_id` đã lưu.
 5. `done` và `final` được lưu trong cùng transaction với bản ghi hội thoại/lượt luyện. `events` không chứa token tạm. Khi Talk thành công nhưng chấm điểm thất bại (hoặc ngược lại), trạng thái là `failed` và phần kết quả thành công vẫn có thể xem lại.
 6. Mất kết nối/hủy tác vụ trước khi xong đánh dấu `request_interrupted`. Nếu tiến trình bị dừng đột ngột, lần tra cứu hoặc gửi lại sau hạn 4 phút đánh dấu `request_expired`. Worker cũ không được ghi kết quả sau hạn đó. Khóa phiên Talk tự hết hạn sau tối đa 5 phút nếu tiến trình không dọn được.
 
-Request đã được chấp nhận không tự chạy lại dưới cùng UUID, kể cả khi thất bại. Sau khi xem trạng thái và phần kết quả đã lưu, người dùng có thể chủ động tạo lượt mới với UUID mới. Request bị từ chối trước khi chấp nhận do phiên bận, không thuộc quyền sở hữu hoặc hết giới hạn không giữ mã trong DB.
+Request đã được chấp nhận không tự chạy lại dưới cùng UUID, kể cả khi thất bại hoặc bị hủy. Sau khi xem trạng thái và phần kết quả đã lưu, người dùng có thể chủ động tạo lượt mới với UUID mới. Request bị từ chối trước khi chấp nhận do phiên bận, không thuộc quyền sở hữu hoặc hết giới hạn không giữ mã trong DB.
 
 Bộ kiểm thử hiện kiểm tra gửi lại, xung đột nội dung, quyền truy cập, mất phản hồi sau commit, lỗi từng dịch vụ, hủy tác vụ và hai worker tranh cùng mã trên SQLite. Vẫn cần kiểm thử các giao dịch đồng thời trên PostgreSQL thật trước khi nghiệm thu triển khai.
 
@@ -219,3 +220,17 @@ Khi mở lại buổi ôn, thẻ bị xóa, tạm ngừng hoặc đổi lịch (
 FSRS vẫn áp dụng cho từng lượt đánh giá: chọn Again hẹn lại sau 10 phút, thẻ được tính đã đánh giá trong buổi hiện tại và có thể xuất hiện ở buổi mới khi đến hạn. Xóa thẻ vẫn giữ thống kê đánh giá của buổi; xóa bộ thẻ giữ hàng đợi hiện có và đặt `deck_id=null`. Thống kê không giữ nội dung thẻ đã xóa. Migration giữ nguyên các lượt đánh giá cũ với `study_session_id=null`.
 
 Tạo buổi mới giới hạn 20 lần/tài khoản/phút. Bộ kiểm thử có tranh chấp tạo buổi và chấm cùng thẻ từ hai worker trên SQLite; vẫn cần nghiệm thu các giao dịch này trên PostgreSQL.
+
+### Hủy lượt AI
+
+`POST /requests/{request_id}/cancel` yêu cầu JWT của chủ request, không cần body. Dùng API này cho cả SSE Talk và WebSocket audio trong lúc đang chờ STT, LLM hoặc chấm điểm. Response trả cùng cấu trúc với API tra cứu request.
+
+- Request đang chạy chuyển sang `cancelled`, thêm sự kiện lỗi `request_cancelled` và giải phóng đúng khóa phiên Talk của lượt đó. Gửi lại lệnh hủy không tạo thêm sự kiện. Có thể bắt đầu lượt mới với UUID mới.
+- Kết quả đã commit trước khi hủy vẫn nằm trong `events` và lịch sử. Ví dụ Talk đã trả `done` nhưng đang đợi chấm điểm: phản hồi Talk được giữ, chưa tạo lượt phát âm. Nếu toàn bộ kết quả đã commit trước lệnh hủy, API trả `completed` và không xóa kết quả.
+- Worker kiểm tra trạng thái qua kết nối DB riêng, khoảng 250 ms giữa các lần kiểm tra trong lúc chờ AI. Khi thấy đã hủy, worker ngừng nhận token, hủy tác vụ I/O và đóng kết nối tới dịch vụ AI. Thời gian thực tế còn phụ thuộc DB/network; đây không phải cam kết SLA. Nhà cung cấp AI có thể vẫn tiếp tục tính toán sau khi kết nối bị đóng.
+- SSE/WebSocket đang mở nhận lỗi `request_cancelled`. FE nên bỏ phần text tạm chưa có `done`, đồng thời dùng `events` từ response hủy/tra cứu để giữ các kết quả đã lưu. Token đã gửi trước khi worker nhận thấy yêu cầu hủy có thể vẫn tới client.
+- Worker cũ không được ghi thêm kết quả hoặc giải phóng khóa của lượt mới. Hủy request không thuộc tài khoản hoặc không tồn tại trả 404. Request đã kết thúc giữ trạng thái cũ; request đã quá hạn chuyển sang `failed` với lỗi `request_expired`.
+
+Migration `0012_request_cancellation` lưu mã khóa phiên trên các request mới. Request có từ trước migration không có mã này, nên lệnh hủy không tự giải phóng khóa cũ; khóa sẽ hết hạn theo cơ chế hiện có. Dừng API cũ trước migration và khởi động phiên bản mới để dùng đầy đủ chức năng.
+
+Kiểm thử bao gồm HTTP hủy trong khi WebSocket/SSE đang chạy, hủy ở từng giai đoạn AI, giữ kết quả thành công một phần, hủy cạnh tranh với commit, khóa phiên cũ/mới và timeout khi client đọc chậm. Các dịch vụ AI trong kiểm thử vẫn được giả lập; cần nghiệm thu hủy kết nối với dịch vụ triển khai thật.

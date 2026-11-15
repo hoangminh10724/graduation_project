@@ -3,7 +3,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
-from sqlalchemy.pool import StaticPool
 
 from app import llm
 from app.db import get_db
@@ -12,11 +11,9 @@ from app.models import Base, DialogueTurn, Review
 
 
 @pytest.fixture
-def api(monkeypatch):
+def api(monkeypatch, tmp_path):
     monkeypatch.setenv("JWT_SECRET", "test-secret-with-at-least-32-bytes")
-    engine = create_engine(
-        "sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False}
-    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'api.db'}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
 
     def db_override():

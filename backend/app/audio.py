@@ -19,6 +19,7 @@ from .progress import store_attempt
 from .speech import Assessment, SpeechError, request_audio
 from .limits import enforce_limit
 from . import requests
+from .cancellation import AIStopped, CancellationGuard
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ def prepare_turn(
             return user_id, [], None, record_id, replay
         enforce_limit(db, "ai-turn", str(user_id), 20, commit=False)
         messages, token = reserve_turn(db, user_id, payload.session_id, commit=False) if payload.session_id else ([], None)
+        requests.bind_turn(db, record_id, token)
         db.commit()
         return user_id, messages, token, record_id, None
     finally:
@@ -75,15 +77,17 @@ async def complete_audio(ws: WebSocket, db: DB, payload: AudioEnd, audio: bytes,
             await ws.send_json(event)
         return
     assessment_task = None
+    guard = CancellationGuard(db.get_bind(), record_id)
     try:
+        await guard.check(force=True)
         reference_text = (payload.text.strip() if payload.text else "") or None
         transcript = None
         if reference_text is None:
-            result = await request_audio("/transcribe", audio, payload.media_type)
+            result = await guard.run(request_audio("/transcribe", audio, payload.media_type))
             transcript = result["text"]
         assessment_text = reference_text or transcript
         assessment_task = asyncio.create_task(
-            request_audio("/assess", audio, payload.media_type, assessment_text)
+            guard.run(request_audio("/assess", audio, payload.media_type, assessment_text))
         )
         transcript_event = {
             "type": "transcript", "text": assessment_text,
@@ -93,7 +97,7 @@ async def complete_audio(ws: WebSocket, db: DB, payload: AudioEnd, audio: bytes,
         await ws.send_json(saved[0])
         if payload.session_id is not None:
             async with aclosing(chat_events(
-                db, payload.session_id, assessment_text, messages, token, request_record_id=record_id,
+                db, payload.session_id, assessment_text, messages, token, request_record_id=record_id, guard=guard,
             )) as events:
                 async for event in events:
                     if event["type"] == "error":
@@ -121,6 +125,14 @@ async def complete_audio(ws: WebSocket, db: DB, payload: AudioEnd, audio: bytes,
     except SpeechError:
         await run_in_threadpool(requests.interrupt, db, record_id, "speech_unavailable")
         raise
+    except (AIStopped, HTTPException) as stopped:
+        code = stopped.code if isinstance(stopped, AIStopped) else stopped.detail
+        if isinstance(stopped, HTTPException) and code not in {
+            "request_cancelled", "request_expired", "session_deleted", "request_finished", "request_unavailable",
+        }:
+            raise
+        await run_in_threadpool(requests.interrupt, db, record_id, code)
+        await ws.send_json({"type": "error", "code": code, "request_id": str(payload.request_id)})
     finally:
         with CancelScope(shield=True):
             if assessment_task is not None:

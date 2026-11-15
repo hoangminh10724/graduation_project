@@ -5,6 +5,39 @@ info:
   description: Hợp đồng giữa frontend, backend và ai-service. Sửa file này trước khi
     đổi API.
 paths:
+  /requests/{request_id}/cancel:
+    post:
+      summary: Cancel Request
+      operationId: cancel_request_requests__request_id__cancel_post
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: request_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Request Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestView'
+        '404':
+          description: Không tìm thấy request của người dùng
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      description: Cancel a running owned request. Keeps committed events and releases
+        only the matching Talk reservation. Idempotent; completed or failed requests
+        retain their terminal state. Live SSE/WebSocket receives request_cancelled
+        after the worker observes cancellation. Use a new UUID for a new attempt.
   /study-sessions:
     post:
       summary: Create Study
@@ -880,7 +913,10 @@ paths:
         the ID was reused with different input. GET /requests/{request_id} returns
         durable state and committed events without uploading audio again. Interrupted
         requests are never executed again under the same ID. Failed requests may contain
-        successfully committed Talk or assessment results.
+        successfully committed Talk or assessment results. POST /requests/{request_id}/cancel
+        requests cooperative cancellation while audio processing is active. A cancelled
+        request retains committed events and emits request_cancelled; it cannot be
+        re-executed with the same UUID.
       responses:
         '101':
           description: Switching Protocols
@@ -2060,6 +2096,7 @@ components:
           - running
           - completed
           - failed
+          - cancelled
           title: Status
         created_at:
           type: string

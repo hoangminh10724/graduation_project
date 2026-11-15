@@ -21,6 +21,7 @@ from .auth import CurrentUser, DB
 from .models import AIRequest, Attempt, DialogueTurn, Session
 from .prompts import coaching_prompt
 from .limits import enforce_limit
+from .cancellation import AIStopped, CancellationGuard, guarded_stream
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -239,6 +240,7 @@ async def chat_events(
     db: DB, session_id: int, text: str, messages: list[dict[str, str]],
     turn_token: str, pronunciation_hint: str | None = None,
     request_record_id: int | None = None, terminal: bool = False,
+    guard: CancellationGuard | None = None,
 ) -> AsyncIterator[dict]:
     learner_message = text
     if pronunciation_hint:
@@ -247,7 +249,11 @@ async def chat_events(
     pending = ""
     words_sent = 0
     started = perf_counter()
+    if guard is not None:
+        await guard.check(force=True)
     stream = llm.stream_reply([*messages, {"role": "user", "content": learner_message}])
+    if guard is not None:
+        stream = guarded_stream(stream, guard)
     try:
         async for token in stream:
             if not chunks:
@@ -272,6 +278,8 @@ async def chat_events(
         if not reply:
             raise llm.LLMError("LLM returned an empty reply")
     except llm.LLMError:
+        if guard is not None:
+            await guard.check(force=True)
         yield {"type": "error", "code": "llm_unavailable"}
         return
     finally:
@@ -281,6 +289,8 @@ async def chat_events(
     try:
         event = await run_in_threadpool(store_turn, db, session_id, text, reply, turn_token, request_record_id, terminal)
     except HTTPException:
+        if guard is not None:
+            await guard.check(force=True)
         yield {"type": "error", "code": "turn_expired"}
         return
     except SQLAlchemyError:
@@ -322,6 +332,7 @@ def chat(payload: ChatRequest, user: CurrentUser, db: DB) -> StreamingResponse:
         if replay is None:
             enforce_limit(db, "ai-turn", str(user.id), 20, commit=False)
             messages, token = reserve_turn(db, user.id, payload.session_id, commit=False)
+            requests.bind_turn(db, record_id, token)
             db.commit()
     except Exception:
         db.rollback()
@@ -332,17 +343,22 @@ def chat(payload: ChatRequest, user: CurrentUser, db: DB) -> StreamingResponse:
             for event in requests.replay_events(replay):
                 yield f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
             return
+        guard = CancellationGuard(db.get_bind(), record_id)
         try:
             async with asyncio.timeout(180):
                 async with aclosing(chat_events(
                     db, payload.session_id, payload.text, messages, token,
-                    request_record_id=record_id, terminal=True,
+                    request_record_id=record_id, terminal=True, guard=guard,
                 )) as events:
                     async for event in events:
                         if event["type"] == "error":
                             await run_in_threadpool(requests.interrupt, db, record_id, event["code"])
                         event = {**event, "request_id": str(payload.request_id)}
                         yield f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except AIStopped as stopped:
+            await run_in_threadpool(requests.interrupt, db, record_id, stopped.code)
+            event = {"type": "error", "code": stopped.code, "request_id": str(payload.request_id)}
+            yield f"event: error\ndata: {json.dumps(event)}\n\n"
         except TimeoutError:
             await run_in_threadpool(requests.interrupt, db, record_id, "request_timeout")
             event = {"type": "error", "code": "request_timeout", "request_id": str(payload.request_id)}

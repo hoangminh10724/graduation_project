@@ -22,6 +22,26 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def stop_reason(bind, record_id: int) -> str | None:
+    """Use an independent short transaction while the worker is awaiting external I/O."""
+    with Session(bind) as db:
+        row = db.execute(select(AIRequest.status, AIRequest.deadline).where(AIRequest.id == record_id)).one_or_none()
+        if row is None:
+            return "request_unavailable"
+        if row.status == "cancelled":
+            return "request_cancelled"
+        if row.status == "running":
+            return "request_expired" if row.deadline <= utcnow() else None
+        if row.status == "failed":
+            events = json.loads(db.scalar(select(AIRequest.events_json).where(AIRequest.id == record_id)))
+            return next((event["code"] for event in reversed(events) if event.get("type") == "error"), "request_finished")
+        return "request_finished"
+
+
+def bind_turn(db: Session, record_id: int, token: str | None) -> None:
+    db.execute(update(AIRequest).where(AIRequest.id == record_id).values(turn_token=token))
+
+
 def claim(db: Session, user_id: int, request_id: UUID, kind: str, inputs: dict) -> tuple[int, list[dict] | None]:
     """The new claim and session reservation must be committed in one transaction."""
     session_id = inputs.get("session_id")
@@ -65,7 +85,7 @@ def record_events(db: Session, record_id: int, events: list[dict], terminal: boo
     ).values(status="running").returning(AIRequest.request_id, AIRequest.events_json, AIRequest.kind)).one_or_none()
     if row is None:
         db.rollback()
-        raise HTTPException(409, "request_expired")
+        raise HTTPException(409, stop_reason(db.get_bind(), record_id) or "request_expired")
     saved = json.loads(row.events_json)
     additions = [{**event, "request_id": row.request_id} for event in events]
     saved.extend(additions)
@@ -111,10 +131,18 @@ def replay_events(events: list[dict]):
 class RequestView(BaseModel):
     request_id: UUID
     kind: Literal["chat", "audio"]
-    status: Literal["running", "completed", "failed"]
+    status: Literal["running", "completed", "failed", "cancelled"]
     created_at: datetime
     deadline: datetime
     events: list[dict]
+
+
+def request_view(row: AIRequest) -> RequestView:
+    return RequestView(
+        request_id=row.request_id, kind=row.kind, status=row.status,
+        created_at=row.created_at.replace(tzinfo=timezone.utc), deadline=row.deadline.replace(tzinfo=timezone.utc),
+        events=json.loads(row.events_json),
+    )
 
 
 @router.get("/{request_id}")
@@ -124,8 +152,39 @@ def request_status(request_id: UUID, user: CurrentUser, db: DB) -> RequestView:
         raise HTTPException(404, "Request not found")
     expire(db, record_id)
     row = db.get(AIRequest, record_id)
-    return RequestView(
-        request_id=row.request_id, kind=row.kind, status=row.status,
-        created_at=row.created_at.replace(tzinfo=timezone.utc), deadline=row.deadline.replace(tzinfo=timezone.utc),
-        events=json.loads(row.events_json),
-    )
+    return request_view(row)
+
+
+@router.post("/{request_id}/cancel")
+def cancel_request(request_id: UUID, user: CurrentUser, db: DB) -> RequestView:
+    user_id = user.id
+    reference = db.execute(select(AIRequest.id, AIRequest.session_id).where(
+        AIRequest.user_id == user_id, AIRequest.request_id == str(request_id),
+    )).one_or_none()
+    if reference is None:
+        raise HTTPException(404, "Request not found")
+    record_id, session_id = reference
+    db.rollback()
+    # Session -> request matches turn commits and deletion. Guarded writes also serialize SQLite.
+    if session_id is not None:
+        db.execute(update(TalkSession).where(TalkSession.id == session_id, TalkSession.user_id == user_id).values(
+            turn_token=TalkSession.turn_token,
+        ))
+    record = db.scalar(update(AIRequest).where(AIRequest.id == record_id, AIRequest.user_id == user_id).values(
+        status=AIRequest.status,
+    ).returning(AIRequest).execution_options(populate_existing=True))
+    if record is None:
+        raise HTTPException(404, "Request not found")
+    if record.status == "running":
+        expired = record.deadline <= utcnow()
+        record.status = "failed" if expired else "cancelled"
+        events = json.loads(record.events_json)
+        events.append({"type": "error", "code": "request_expired" if expired else "request_cancelled", "request_id": record.request_id})
+        record.events_json = json.dumps(events, ensure_ascii=False)
+        if record.session_id is not None and record.turn_token is not None:
+            db.execute(update(TalkSession).where(
+                TalkSession.id == record.session_id, TalkSession.turn_token == record.turn_token,
+            ).values(turn_token=None, busy_until=None))
+    result = request_view(record)
+    db.commit()
+    return result
