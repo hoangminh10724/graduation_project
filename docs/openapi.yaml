@@ -875,6 +875,24 @@ paths:
           - type: string
           - type: 'null'
           title: Timezone Name
+      - name: date_from
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Date From
+      - name: date_to
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Date To
       responses:
         '200':
           description: Successful Response
@@ -888,6 +906,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      description: Optional date_from/date_to filter pronunciation statistics by inclusive
+        local dates; provide both, at most 366 days. Streak remains based on all pronunciation
+        history. weak_phonemes lists up to five lowest averages with sample counts.
   /ws/audio:
     get:
       summary: (backend, WebSocket) Gửi audio, nhận chấm điểm và phản hồi Talk
@@ -1677,6 +1698,24 @@ components:
             type: object
           type: array
           title: Daily
+        date_from:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Date From
+        date_to:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Date To
+        weak_phonemes:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Weak Phonemes
       type: object
       required:
       - attempts
@@ -1684,6 +1723,7 @@ components:
       - phoneme_averages
       - timezone
       - daily
+      - weak_phonemes
       title: ProgressView
     ReviewCreate:
       properties:

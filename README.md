@@ -42,6 +42,8 @@ Sau khi cập nhật backend, chạy lại `alembic upgrade head` để thêm d�
 - Sau sự kiện `transcript`, Talk và chấm phát âm chạy song song. `done` kết thúc phản hồi Talk, `final` trả kết quả chấm và có thể tới sau `done`. Nếu chấm lỗi, backend phát `assessment_unavailable` và vẫn cho Talk hoàn thành.
 - Sự kiện `coaching` chứa `errors` và `hints` do AI service cung cấp, frontend hiển thị khi kết quả chấm tới. Phản hồi Talk được giới hạn tối đa 40 từ bằng bộ lọc streaming.
 - `GET /progress?timezone_name=Asia/Ho_Chi_Minh` trả streak và dữ liệu `daily` theo ngày địa phương. Có thể truyền múi giờ IANA khác, mặc định là Việt Nam.
+- Thêm `date_from=2026-11-01&date_to=2026-11-15` để lọc thống kê phát âm theo ngày địa phương, bao gồm cả hai đầu. Phải truyền cả hai ngày, tối đa 366 ngày; bỏ cả hai để xem toàn bộ lịch sử. Ngày không có lượt luyện vẫn xuất hiện trong khoảng lọc với `attempts=0`, `sentence_average=null`. Bộ lọc không thay đổi streak hiện tại, vốn được tính từ toàn bộ lịch sử phát âm.
+- `weak_phonemes` trả tối đa năm âm có điểm trung bình thấp nhất trong khoảng đã chọn, kèm `samples` là số lần âm đó được chấm (không phải số bài luyện). Đây là thứ tự điểm quan sát được, chưa phải kết luận về năng lực khi có ít mẫu. Chỉ các kết quả chấm có cấu trúc hợp lệ mới đóng góp vào thống kê âm.
 
 - Gọi `POST /auth/register` hoặc `POST /auth/login` để lấy JWT. Gửi JWT qua header `Authorization: Bearer <token>` cho API flashcard, Talk và tiến độ.
 - Phòng Talk dạng văn bản dùng `POST /sessions`, sau đó `POST /chat/stream` với `request_id` dạng UUID, `session_id` và `text`. Đọc sự kiện SSE `token`, `done` và `error`.
