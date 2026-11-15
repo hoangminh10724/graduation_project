@@ -6,12 +6,13 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
-from . import attempts, audio, auth, cards, dashboard, decks, dialogue, profile, progress, recovery, requests, study
+from . import attempts, audio, auth, cards, dashboard, decks, dialogue, personal_data, profile, progress, recovery, requests, study
 from .db import DatabaseConfigurationError, get_engine
 
 app = FastAPI(title="WordSpeak backend")
 app.include_router(auth.router)
 app.include_router(profile.router)
+app.include_router(personal_data.router)
 app.include_router(cards.router)
 app.include_router(decks.router)
 app.include_router(dialogue.router)

@@ -1435,6 +1435,43 @@ paths:
         Pronunciation, Talk and reviews each count as an activity; a successful audio
         Talk may count twice. Undated legacy Talk turns are excluded and reported
         separately. Counts reflect retained history and decrease after deletion.
+  /me/export:
+    post:
+      summary: Export Data
+      operationId: export_data_me_export_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmPassword'
+        required: true
+      responses:
+        '200':
+          description: Versioned learning-data JSON attachment
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          description: Invalid access token or password
+        '413':
+          description: Export exceeds 50 MiB
+        '429':
+          description: Export request limit exceeded
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+      description: Download owned retained learning data as a schema_version=1 JSON
+        attachment. Requires current password and JWT; 3 requests per account per
+        minute. Includes profile, decks, cards, reviews, talk_sessions, talk_turns,
+        pronunciation_attempts, study_sessions and study_items. Auth secrets and operational
+        request/queue data are excluded. Maximum file size 50 MiB; timestamps UTC.
+        No import endpoint.
 components:
   securitySchemes:
     BearerAuth:
@@ -2632,3 +2669,14 @@ components:
       - active_study_session_id
       - undated_talk_turns
       title: DashboardView
+    ConfirmPassword:
+      properties:
+        current_password:
+          type: string
+          format: password
+          title: Current Password
+          writeOnly: true
+      type: object
+      required:
+      - current_password
+      title: ConfirmPassword

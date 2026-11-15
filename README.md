@@ -249,3 +249,23 @@ Kiểm thử bao gồm HTTP hủy trong khi WebSocket/SSE đang chạy, hủy �
 - Thống kê phản ánh lịch sử còn được giữ: xóa phiên Talk sẽ giảm số lượt Talk; xóa thẻ và lịch sử ôn sẽ giảm số lượt ôn. Xóa phiên Talk vẫn giữ các lượt phát âm theo hợp đồng hiện có. Các số đếm không phải thời gian học, và không phải bản ghi thành tích bất biến sau khi xóa dữ liệu.
 
 Đã kiểm thử biên ngày Việt Nam, ngày đổi giờ mùa hè, dữ liệu của tài khoản khác, replay, xóa lịch sử và migration giữ nguyên lượt Talk cũ. Vẫn cần nghiệm thu với PostgreSQL và AI triển khai thật.
+
+### Xuất dữ liệu học tập cá nhân
+
+`POST /me/export` yêu cầu JWT và body `{"current_password":"..."}`. Mật khẩu được kiểm tra lại; sai mật khẩu trả 401. Mỗi tài khoản tối đa 3 yêu cầu/phút, kể cả yêu cầu sai mật khẩu; vượt giới hạn trả 429 với `Retry-After`.
+
+Thành công trả file UTF-8 JSON `wordspeak-data.json`, `schema_version=1`, `exported_at` UTC và các trường:
+
+- `profile`: thông tin hồ sơ, email, ngày tạo và thiết lập học tập.
+- `decks`, `cards`, `reviews`: bộ thẻ, nội dung và lịch FSRS hiện tại, lịch sử đánh giá.
+- `talk_sessions`, `talk_turns`: phiên Talk và các lượt hội thoại đã lưu.
+- `pronunciation_attempts`: câu mẫu/transcript, điểm và `detail_json` gốc chứa kết quả chấm.
+- `study_sessions`, `study_items`: các buổi ôn và hàng đợi/kết quả từng thẻ.
+
+ID và liên kết giữa các bản ghi được giữ nguyên. `detail_json` và `selection_json` là chuỗi JSON như dữ liệu đang lưu; timestamp dùng UTC với hậu tố `Z`, giá trị chưa biết giữ `null`. Chỉ xuất lịch sử còn tồn tại, không phục hồi dữ liệu đã xóa. File này là bản sao dữ liệu để người học sử dụng, chưa có chức năng nhập lại.
+
+Không xuất password hash, access/refresh token, token khôi phục, hàng đợi email, trạng thái khóa hoặc bản sao request AI. Các thông tin xác thực được loại bằng danh sách trường cho phép, không serialize toàn bộ model.
+
+Backend đọc một snapshot nhất quán (PostgreSQL `REPEATABLE READ`), hoàn tất file trước khi trả response và đóng transaction trước khi tải xuống. File có `Cache-Control: no-store`, `Content-Disposition: attachment`. Nội dung trên 1 MiB được chuyển sang file tạm; tối đa 50 MiB, vượt mức trả 413 thay vì trả file thành công thiếu dữ liệu. File tạm được đóng/xóa khi tải xong, ngắt kết nối hoặc tạo file thất bại. Không có URL tải công khai hay bản sao xuất được lưu lâu dài trên server.
+
+Đã kiểm thử quyền sở hữu, mật khẩu, giới hạn yêu cầu/dung lượng, đóng file khi ngắt tải và snapshot khi có chỉnh sửa đồng thời trên SQLite. PostgreSQL vẫn cần nghiệm thu trong môi trường triển khai. Chức năng xóa tài khoản và chính sách lưu trữ vẫn đang hoàn thiện.
