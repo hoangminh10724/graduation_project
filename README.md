@@ -77,7 +77,7 @@ Test: `pytest` trong `backend/` và `ai-service/`.
 
 ### Giới hạn cho bản demo
 
-Sau cập nhật, chạy `alembic upgrade head` (hiện tại là `0008_ai_requests`). Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
+Sau cập nhật, chạy `alembic upgrade head` (hiện tại là `0009_account_recovery`). Bộ đếm dùng chung DB và cửa sổ một phút. Đăng ký giới hạn 5 lần/IP, đăng nhập 30 lần/IP và 10 lần/email, tạo phiên 20 lần/tài khoản, gọi AI 20 lượt/tài khoản, mở WebSocket 30 lần/IP. HTTP trả 429 kèm Retry-After. WebSocket trả rate_limited.
 
 WebSocket yêu cầu xác thực trước audio, giới hạn 8 MiB/lượt, thời gian thu tối đa 120 giây và xử lý tối đa 180 giây. Token được kiểm tra lại mỗi lượt. Hợp đồng này yêu cầu frontend cập nhật bước xác thực đầu kết nối.
 
@@ -90,7 +90,8 @@ Backend chỉ publish cổng 8000 trên localhost. AI service dùng mạng nội
 - Đã bổ sung hồ sơ người học, refresh token luân chuyển, danh sách/thu hồi phiên đăng nhập và đổi mật khẩu.
 - Đã bổ sung lịch sử phát âm phân trang, chi tiết điểm/lỗi/gợi ý và liên kết phiên Talk. Lượt mới phân biệt câu mẫu với transcript STT.
 - Đã bổ sung request_id bắt buộc cho audio/Talk, tra cứu trạng thái và phát lại kết quả đã lưu khi mất phản hồi, không gọi AI lại bằng cùng mã.
-- Đang hoàn thiện khôi phục tài khoản, phiên ôn tập, vòng đời lượt audio/Talk và dashboard.
+- Đã bổ sung quên/đặt lại mật khẩu, xác minh email và worker gửi email từ hàng đợi DB có thử lại khi lỗi.
+- Đang hoàn thiện phiên ôn tập, quản lý phiên Talk, dashboard và quản lý dữ liệu cá nhân.
 - Cần nghiệm thu PostgreSQL đồng thời, email, STT/chấm phát âm và LLM thật trước khi chốt bản demo khách hàng.
 
 ### Quản lý flashcard và bộ thẻ
@@ -154,3 +155,37 @@ JWT của bản cũ được tiếp nhận tới khi hết hạn hoặc người
 Request đã được chấp nhận không tự chạy lại dưới cùng UUID, kể cả khi thất bại. Sau khi xem trạng thái và phần kết quả đã lưu, người dùng có thể chủ động tạo lượt mới với UUID mới. Request bị từ chối trước khi chấp nhận do phiên bận, không thuộc quyền sở hữu hoặc hết giới hạn không giữ mã trong DB.
 
 Bộ kiểm thử hiện kiểm tra gửi lại, xung đột nội dung, quyền truy cập, mất phản hồi sau commit, lỗi từng dịch vụ, hủy tác vụ và hai worker tranh cùng mã trên SQLite. Vẫn cần kiểm thử các giao dịch đồng thời trên PostgreSQL thật trước khi nghiệm thu triển khai.
+
+### Khôi phục tài khoản và xác minh email
+
+| API | Chức năng |
+|---|---|
+| `POST /auth/forgot-password` | Gửi `{email}` để yêu cầu link khôi phục. Luôn trả cùng phản hồi 202 cho email tồn tại và không tồn tại khi cấu hình hợp lệ |
+| `POST /auth/reset-password` | Gửi `{token, new_password}`; thành công trả 204, thu hồi mọi phiên đăng nhập và link tài khoản cũ |
+| `POST /auth/verification/request` | Yêu cầu JWT; xếp hàng email xác minh của chính tài khoản hiện tại, trả 202 |
+| `POST /auth/verify-email` | Gửi `{token}`; thành công trả 204 và đặt `email_verified=true` trong hồ sơ |
+
+Token đặt lại mật khẩu có hạn 30 phút, token xác minh email có hạn 24 giờ và chỉ được dùng một lần đúng mục đích. API trả 400 nếu token sai, hết hạn, đã dùng hoặc bị vô hiệu hóa. Đổi mật khẩu/đăng xuất tất cả cũng vô hiệu hóa các link tài khoản được tạo trước đó. Đặt lại mật khẩu không tự đăng nhập và không tự đánh dấu email đã xác minh. Tài khoản hiện vẫn sử dụng tính năng học khi chưa xác minh email; FE có thể nhắc người dùng xác minh dựa trên `GET /me`.
+
+Yêu cầu khôi phục giới hạn 10 lần/IP/phút và 3 lần/email/phút. Yêu cầu xác minh giới hạn 3 lần/tài khoản/phút. Các API tiêu thụ token giới hạn 20 lần/IP/phút cho mỗi loại. 202 chỉ xác nhận tiếp nhận yêu cầu, không xác nhận email đã đến hộp thư. Thiếu cấu hình email trả 503 trước khi kiểm tra email có tồn tại.
+
+Cấu hình trong `.env` theo `.env.example`:
+
+- `APP_PUBLIC_URL`: địa chỉ FE tin cậy dùng tạo link, HTTPS khi public; HTTP chỉ được chấp nhận với localhost/loopback. Backend không tạo link từ Host header.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`: máy chủ và địa chỉ gửi.
+- `SMTP_SECURITY`: `starttls` (mặc định), `ssl`, hoặc `plain` chỉ dùng với SMTP thử nghiệm trong môi trường cô lập.
+- `SMTP_USERNAME`, `SMTP_PASSWORD`: cùng điền hoặc cùng để trống, tùy SMTP server.
+
+Sau migration và cấu hình SMTP, chạy worker riêng:
+
+```powershell
+docker compose --profile email up -d --build mail-worker
+```
+
+Không dùng Docker: từ thư mục `backend`, đặt cùng `DATABASE_URL`, `JWT_SECRET` và cấu hình SMTP như API rồi chạy `python -m app.mail_worker`. Có thể dùng `python -m app.mail_worker --once --limit 100` để xử lý các thư đang đến hạn rồi thoát. Worker không tự nạp file `.env` khi chạy ngoài Compose.
+
+Hàng đợi chỉ lưu mã băm token. Worker tái tạo token bằng HMAC với `JWT_SECRET`, UUID ngẫu nhiên và ngữ cảnh tài khoản; không lưu hoặc ghi log token thô. Thay `JWT_SECRET` khiến các thư chưa gửi với khóa cũ bị đánh dấu lỗi; người dùng cần yêu cầu link mới. Worker thử gửi tối đa 5 lần, giãn thời gian 30/60/120/240 giây. Nếu worker dừng, worker khác có thể nhận lại thư sau 2 phút. SMTP có thể giao trùng thư nếu tiến trình dừng ngay sau khi server nhận email, nhưng token vẫn chỉ dùng được một lần. Giữ nguyên `Message-ID` cho các lần gửi lại.
+
+FE cần trang `/reset-password` và `/verify-email`. Token nằm trong URL fragment `#token=...`; FE đọc, xóa fragment khỏi thanh địa chỉ và gửi token qua body POST tương ứng. Không gọi GET để tiêu thụ token, tránh trình quét link email tự thực hiện thao tác.
+
+Đã kiểm thử gửi thư tới SMTP giả lập trên localhost, thử lại sau lỗi, khôi phục worker bị dừng, token dùng một lần và hai yêu cầu đặt lại mật khẩu đồng thời trên SQLite. Chưa nghiệm thu SMTP nhà cung cấp thật, các trang FE nhận link và PostgreSQL đồng thời.

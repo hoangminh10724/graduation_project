@@ -53,6 +53,18 @@ services:
     ports:
       - "3000:3000"
 
+  mail-worker:
+    build: ./backend
+    command: ["python", "-m", "app.mail_worker"]
+    profiles: ["email"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
   llm:
     image: ollama/ollama
     profiles: ["local-llm"]

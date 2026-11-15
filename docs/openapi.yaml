@@ -5,6 +5,96 @@ info:
   description: Hợp đồng giữa frontend, backend và ai-service. Sửa file này trước khi
     đổi API.
 paths:
+  /auth/forgot-password:
+    post:
+      summary: Forgot Password
+      operationId: forgot_password_auth_forgot_password_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecoveryEmail'
+        required: true
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecoveryAccepted'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          description: Request budget exceeded; Retry-After contains seconds to wait.
+        '503':
+          description: Email service is not configured.
+  /auth/reset-password:
+    post:
+      summary: Reset Password
+      operationId: reset_password_auth_reset_password_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordReset'
+        required: true
+      responses:
+        '204':
+          description: Successful Response
+        '400':
+          description: Token không hợp lệ, hết hạn hoặc đã dùng
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          description: Request budget exceeded; Retry-After contains seconds to wait.
+  /auth/verification/request:
+    post:
+      summary: Request Verification
+      operationId: request_verification_auth_verification_request_post
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecoveryAccepted'
+        '429':
+          description: Request budget exceeded; Retry-After contains seconds to wait.
+        '503':
+          description: Email service is not configured.
+      security:
+      - HTTPBearer: []
+  /auth/verify-email:
+    post:
+      summary: Verify Email
+      operationId: verify_email_auth_verify_email_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountToken'
+        required: true
+      responses:
+        '204':
+          description: Successful Response
+        '400':
+          description: Token không hợp lệ, hết hạn hoặc đã dùng
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          description: Request budget exceeded; Retry-After contains seconds to wait.
   /requests/{request_id}:
     get:
       summary: Request Status
@@ -1455,6 +1545,9 @@ components:
         email:
           type: string
           title: Email
+        email_verified:
+          type: boolean
+          title: Email Verified
         display_name:
           type: string
           title: Display Name
@@ -1471,6 +1564,7 @@ components:
       required:
       - id
       - email
+      - email_verified
       - display_name
       - timezone_name
       - cefr_level
@@ -1675,3 +1769,49 @@ components:
       - deadline
       - events
       title: RequestView
+    AccountToken:
+      properties:
+        token:
+          type: string
+          maxLength: 256
+          minLength: 32
+          title: Token
+      type: object
+      required:
+      - token
+      title: AccountToken
+    PasswordReset:
+      properties:
+        token:
+          type: string
+          maxLength: 256
+          minLength: 32
+          title: Token
+        new_password:
+          type: string
+          minLength: 8
+          title: New Password
+      type: object
+      required:
+      - token
+      - new_password
+      title: PasswordReset
+    RecoveryAccepted:
+      properties:
+        message:
+          type: string
+          title: Message
+          default: If the account is eligible, an email will be sent.
+      type: object
+      title: RecoveryAccepted
+    RecoveryEmail:
+      properties:
+        email:
+          type: string
+          maxLength: 255
+          pattern: ^[^\s@]+@[^\s@]+\.[^\s@]+$
+          title: Email
+      type: object
+      required:
+      - email
+      title: RecoveryEmail

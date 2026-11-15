@@ -13,6 +13,7 @@ class ProfileView(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     email: str
+    email_verified: bool
     display_name: str
     timezone_name: str
     cefr_level: str

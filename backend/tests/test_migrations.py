@@ -13,7 +13,7 @@ def test_initial_migration(monkeypatch):
     engine = get_engine()
     tables = {
         "users", "sessions", "cards", "reviews", "attempts", "dialogue_turns",
-        "rate_limits", "decks", "login_sessions", "used_refresh_tokens", "ai_requests",
+        "rate_limits", "decks", "login_sessions", "used_refresh_tokens", "ai_requests", "account_actions",
     }
     try:
         command.upgrade(config, "0004_rate_limits")
@@ -38,6 +38,7 @@ def test_initial_migration(monkeypatch):
             )).one()
             assert attempt.text == "old sentence" and attempt.sentence_score == 72
             assert attempt.reference_text is None and attempt.transcript is None and attempt.session_id is None
+            assert not connection.execute(text("SELECT email_verified FROM users WHERE id=1")).scalar_one()
         assert tables <= set(inspect(engine).get_table_names())
         command.check(config)
 

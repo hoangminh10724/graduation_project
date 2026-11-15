@@ -19,6 +19,27 @@ class User(Base):
     cefr_level: Mapped[str] = mapped_column(String(2), server_default="A2")
     daily_goal: Mapped[int] = mapped_column(Integer, server_default="10")
     token_version: Mapped[int] = mapped_column(Integer, server_default="0")
+    email_verified: Mapped[bool] = mapped_column(Boolean, server_default=false())
+
+
+class AccountAction(Base):
+    __tablename__ = "account_actions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    purpose: Mapped[str] = mapped_column(String(20))
+    token_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    token_version: Mapped[int] = mapped_column(Integer)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    consumed: Mapped[bool] = mapped_column(Boolean, server_default=false())
+    delivery_status: Mapped[str] = mapped_column(String(12))
+    delivery_attempts: Mapped[int] = mapped_column(Integer, server_default="0")
+    available_at: Mapped[datetime] = mapped_column(DateTime)
+    lease_token: Mapped[str | None] = mapped_column(String(36))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime)
+    __table_args__ = (
+        Index("ix_account_actions_user_purpose", "user_id", "purpose"),
+        Index("ix_account_actions_delivery", "delivery_status", "available_at"),
+    )
 
 
 class LoginSession(Base):
