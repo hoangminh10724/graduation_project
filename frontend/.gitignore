@@ -1,0 +1,4 @@
+next-env.d.ts
+*.tsbuildinfo
+!public/audio/*.wav
+!public/audio/dictionary/*.wav
