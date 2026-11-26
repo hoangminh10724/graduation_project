@@ -179,9 +179,11 @@ export function History() {
   const { account, ready } = useApp();
   const [tab, setTab] = useState<"speech" | "prosody" | "talk">("talk");
   const [selected, setSelected] = useState<number>();
-  const remote = useRemote<TalkSession[]>(tab === "talk" ? "/sessions" : null);
-  const session = remote.data?.find((item) => item.id === selected);
-  const detail = useRemote<Turn[]>(tab === "talk" && session ? `/sessions/${session.id}/turns` : null);
+  const remote = useRemote<{ items: TalkSession[] }>(tab === "talk" ? "/sessions" : null);
+  const session = remote.data?.items.find((item) => item.id === selected);
+  const detail = useRemote<{ items: Turn[] }>(
+    tab === "talk" && session ? `/sessions/${session.id}/turns` : null,
+  );
   return (
     <>
       <Title title="Lịch sử">
@@ -218,7 +220,7 @@ export function History() {
           <Notice tone="error">
             {remote.error} <Button onClick={remote.retry}>Thử lại</Button>
           </Notice>
-        ) : !remote.data?.length ? (
+        ) : !remote.data?.items.length ? (
           <Empty title="Chưa có hội thoại" icon="talk">
             <Action href="/talk" primary>
               Mở phòng luyện
@@ -229,7 +231,7 @@ export function History() {
             <Panel className="stack">
               <h2>Các phiên</h2>
               <div>
-                {remote.data.map((item) => (
+                {remote.data.items.map((item) => (
                   <div className="list-item" key={item.id}>
                     <div>
                       <strong>
@@ -257,7 +259,7 @@ export function History() {
                 <h2>{session ? `Phiên ${session.id}` : "Nội dung phiên"}</h2>
                 {!session ? (
                   <p>Chọn một phiên để xem các lượt luyện.</p>
-                ) : !detail.data?.length ? (
+                ) : !detail.data?.items.length ? (
                   <p>Chưa ghi nhận lượt nói hoàn tất.</p>
                 ) : (
                   <>
@@ -265,7 +267,7 @@ export function History() {
                       Trình duyệt đọc lại nội dung đã nhận dạng. Bản thu gốc không có trong lịch sử.
                     </small>
                     <div>
-                      {detail.data.map((turn, index) => (
+                      {detail.data.items.map((turn, index) => (
                         <div key={turn.id} className="list-item">
                           <strong>Lượt {index + 1}</strong>
                           <div className="row">

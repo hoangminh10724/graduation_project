@@ -107,7 +107,7 @@ export type AudioRequest = {
   onEvent: (event: AudioEvent) => void;
 };
 
-async function websocketAttempt(request: AudioRequest, bytes: ArrayBuffer) {
+async function websocketAttempt(request: AudioRequest, bytes: ArrayBuffer, requestId: string) {
   return new Promise<void>((resolve, reject) => {
     const socket = new WebSocket(audioUrl());
     const { blob, token, text, sessionId, signal, onEvent } = request;
@@ -144,7 +144,8 @@ async function websocketAttempt(request: AudioRequest, bytes: ArrayBuffer) {
       return;
     }
     signal.addEventListener("abort", cancel, { once: true });
-    socket.onopen = () => {
+    socket.onopen = () => socket.send(JSON.stringify({ type: "auth", token }));
+    const upload = () => {
       if (settled) return;
       clearTimeout(timeout);
       try {
@@ -155,7 +156,13 @@ async function websocketAttempt(request: AudioRequest, bytes: ArrayBuffer) {
           return;
         }
         socket.send(
-          JSON.stringify({ type: "end", token, media_type: blob.type, text, session_id: sessionId }),
+          JSON.stringify({
+            type: "end",
+            request_id: requestId,
+            media_type: blob.type,
+            text,
+            session_id: sessionId,
+          }),
         );
         dispatched = true;
         request.onDispatch?.();
@@ -168,7 +175,11 @@ async function websocketAttempt(request: AudioRequest, bytes: ArrayBuffer) {
     socket.onmessage = (message) => {
       if (settled) return;
       try {
-        const event = JSON.parse(message.data) as AudioEvent;
+        const event = JSON.parse(message.data) as AudioEvent | { type: "authenticated" };
+        if (event.type === "authenticated") {
+          if (!dispatched) upload();
+          return;
+        }
         onEvent(event);
         if (event.type === "final") {
           receivedFinal = true;
@@ -192,10 +203,11 @@ export async function sendAudio(request: AudioRequest) {
     throw new ApiError(422, "Bản thu cần có dữ liệu và nhỏ hơn 8 MiB.");
   if (request.blob.type !== "audio/webm" && request.blob.type !== "audio/wav")
     throw new ApiError(422, "Định dạng bản thu chưa được hỗ trợ.");
+  const requestId = crypto.randomUUID();
   const bytes = await request.blob.arrayBuffer();
   if (request.signal.aborted) throw new DOMException("Đã hủy", "AbortError");
   try {
-    await websocketAttempt(request, bytes);
+    await websocketAttempt(request, bytes, requestId);
   } catch (error) {
     if (
       request.signal.aborted ||
@@ -205,6 +217,6 @@ export async function sendAudio(request: AudioRequest) {
       throw error;
     await new Promise((resolve) => window.setTimeout(resolve, 450));
     if (request.signal.aborted) throw new DOMException("Đã hủy", "AbortError");
-    await websocketAttempt(request, bytes);
+    await websocketAttempt(request, bytes, requestId);
   }
 }

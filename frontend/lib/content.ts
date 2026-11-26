@@ -23,6 +23,7 @@ const groups = {
     "p:pen|b:bed|t:ten|d:dog|k:key|ɡ:go|f:fan|v:van|θ:think|ð:this|s:see|z:zoo|ʃ:she|ʒ:vision|h:hat|tʃ:chair|dʒ:jam|m:moon|n:name|ŋ:sing|l:light|r:red|j:yes|w:water",
 };
 const tips: Record<string, [string, string, string, number, number, number]> = {
+  θ: ["Đặt nhẹ đầu lưỡi giữa hai hàm răng rồi thổi hơi.", "I think so", "s", 0.5, 0.35, 0.1],
   iː: ["Giãn nhẹ môi, nâng phần trước lưỡi.", "take a seat", "ɪ", 0.88, 0.25, 0.15],
   ɪ: ["Giữ môi thả lỏng và hạ lưỡi một chút.", "please sit", "iː", 0.7, 0.36, 0.24],
   ɛ: ["Mở hàm vừa phải, để lưỡi ở phía trước.", "make the bed", "æ", 0.78, 0.5, 0.31],
@@ -57,7 +58,7 @@ export const sounds = Object.entries(groups).flatMap(([group, entries]) =>
       word,
       group,
       difficult: difficult.has(ipa),
-      supported: Boolean(hint && ipa !== "ʊ"),
+      supported: Boolean(hint),
       hint,
       guide:
         hint?.[0] ??

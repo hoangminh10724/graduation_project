@@ -1,2 +1,2 @@
 /** @type {import('next').NextConfig} */
-module.exports = { output: "standalone" };
+module.exports = process.platform === "win32" ? {} : { output: "standalone" };

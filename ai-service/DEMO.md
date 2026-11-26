@@ -78,12 +78,12 @@ shape or claiming a length error.
 
 This branch adds the local `/demo` workflow. `/demo/analyze` returns provisional
 sound categories and a null score; it does not return the backend's `Assessment`
-schema. The old fabricated-score `/assess` stub now returns HTTP 501, and this
-service provides local `/transcribe` for WAV/WebM conversation turns. The receiving main branch already calls this endpoint. The handoff includes a tested backend patch that forwards word timestamps with recognized text. Validated scoring remains outstanding.
-Its existing unavailable-service handling should be retained.
+schema. The separate `/assess` endpoint returns experimental GOP scores for the
+MVP's isolated practice words. The service also provides local `/transcribe`
+for WAV or WebM conversation turns.
 
 The shared OpenAPI contract preserves the backend endpoints, JWT definitions and
-Assessment schema from current main while documenting the demo and retired stub.
+Assessment schema while documenting the demo and its isolated-word scope.
 Dataset preparation scripts are included; recordings, model weights, local
 environment packages, runtime tokens and generated reports remain local.
 

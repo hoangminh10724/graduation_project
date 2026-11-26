@@ -1,4 +1,16 @@
 import { access, cp } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+if (process.platform === "win32") {
+  const cli = fileURLToPath(new URL("../node_modules/next/dist/bin/next", import.meta.url));
+  const child = spawn(process.execPath, [cli, "start", "-H", process.env.HOSTNAME || "127.0.0.1"], {
+    stdio: "inherit",
+  });
+  process.on("exit", () => child.kill());
+  child.on("exit", (code) => process.exit(code ?? 1));
+  await new Promise(() => {});
+}
 
 const standalone = new URL("../.next/standalone/", import.meta.url);
 const server = new URL("server.js", standalone);

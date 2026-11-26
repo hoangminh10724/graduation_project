@@ -48,12 +48,24 @@ Sau khi cập nhật backend, chạy lại `alembic upgrade head` để thêm d�
 - Gọi `POST /auth/register` hoặc `POST /auth/login` để lấy JWT. Gửi JWT qua header `Authorization: Bearer <token>` cho API flashcard, Talk và tiến độ.
 - Phòng Talk dạng văn bản dùng `POST /sessions`, sau đó `POST /chat/stream` với `request_id` dạng UUID, `session_id` và `text`. Đọc sự kiện SSE `token`, `done` và `error`.
 - Với audio, gửi `{"type":"auth","token":"<JWT>"}` vào `/ws/audio` trong 10 giây đầu và chờ sự kiện `authenticated`. Sau đó gửi các chunk nhị phân và kết thúc bằng `{"type":"end","request_id":"<UUID>","media_type":"audio/webm"}`. Thêm `text` khi có câu mẫu hoặc `session_id` khi cần phản hồi Talk. Giao thức đầy đủ nằm trong `docs/openapi.yaml`.
-- AI service hiện trả dữ liệu mẫu cho `/assess`. Dùng câu mẫu `text` để thử đường đi audio và lưu lượt luyện. Luồng tự nhận dạng cần AI service triển khai `POST /transcribe`; backend trả sự kiện `speech_unavailable` nếu endpoint chưa sẵn sàng.
+- AI service dùng Whisper cho `POST /transcribe` và Wav2Vec2 cho `POST /assess`. Điểm GOP thử nghiệm áp dụng cho 12 từ đơn: think, she, see, sit, seat, bed, bad, book, food, pen, ten và key.
 - Compose mặc định trỏ tới Ollama chạy trên máy host. Chạy `ollama pull qwen2.5:3b` trên host và kiểm tra Ollama đang lắng nghe cổng 11434. Có thể thay `LLM_BASE_URL`, `LLM_MODEL` và `LLM_API_KEY` để dùng endpoint tương thích OpenAI khác.
 - Để chạy Ollama bằng Compose, đặt `LLM_BASE_URL=http://llm:11434/v1`, rồi chạy `docker compose --profile local-llm up -d llm` và `docker compose exec llm ollama pull qwen2.5:3b`. Khởi động lại bằng `docker compose up -d backend` để nạp biến môi trường mới.
 - Để mở proxy tại `http://localhost:8080`, chạy `docker compose --profile proxy up -d proxy`. API và WebSocket qua proxy dùng tiền tố `/api/`.
 
 ## Chạy từng phần (không Docker)
+
+Trên Windows, có thể dùng `python frontend/scripts/local.py --build --python <python.exe>`
+với môi trường Python đã cài requirements của backend và AI service, cùng
+PyTorch CPU, Transformers và SoundFile theo [hướng dẫn AI](ai-service/DEMO.md).
+Chạy `pnpm install --frozen-lockfile` trong frontend trước lần build đầu.
+
+- Đặt `DATABASE_URL` trỏ đến PostgreSQL local. Script chạy Alembic trước khi mở ứng dụng.
+- Đặt `WORDSPEAK_WHISPER_MODEL` và `WORDSPEAK_PHONEME_MODEL` nếu lưu trọng số ngoài
+  các thư mục mặc định dưới `data/models`.
+- Chạy Ollama với `qwen2.5:3b` hoặc đặt `LLM_BASE_URL` và `LLM_MODEL` theo
+  dịch vụ tương thích OpenAI đang chạy trên máy.
+- Mở `http://localhost:3000` để đăng ký, luyện từ đơn và dùng Talk.
 
 ```bash
 # backend (sau khi đặt DATABASE_URL và JWT_SECRET)

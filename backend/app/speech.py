@@ -39,7 +39,7 @@ async def request_audio(
     filename = "speech.wav" if media_type == "audio/wav" else "speech.webm"
     base_url = os.getenv("AI_SERVICE_URL", "http://localhost:8001")
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=5)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60, connect=5)) as client:
             response = await client.post(
                 f"{base_url.rstrip('/')}{path}",
                 files={"audio": (filename, audio, media_type)},

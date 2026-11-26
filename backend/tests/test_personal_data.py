@@ -13,6 +13,20 @@ from app.models import Attempt, Card, Deck, DialogueTurn, Review, Session as Tal
 from test_cards import api, register
 
 
+def test_account_deletion_revokes_access_and_preserves_other_accounts(api):
+    client, _ = api
+    other = register(client, "keep@example.test")
+    owner = register(client, "erase@example.test")
+    payload = {"current_password": "test-pass", "confirmation": "DELETE"}
+    rejected = client.request("DELETE", "/me", headers=owner, json={**payload, "current_password": "incorrect"})
+    assert rejected.status_code == 401
+    assert client.request("DELETE", "/me", headers=owner, json=payload).status_code == 204
+    replacement = register(client, "erase@example.test")
+    assert client.get("/me", headers=owner).status_code == 401
+    assert client.get("/me", headers=replacement).status_code == 200
+    assert client.get("/me", headers=other).status_code == 200
+
+
 def test_export_owned_learning_data_without_auth_secrets(api, monkeypatch):
     client, engine = api
     owner = register(client, "export@example.test")

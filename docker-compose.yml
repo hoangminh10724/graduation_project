@@ -15,6 +15,11 @@ services:
 
   ai-service:
     build: ./ai-service
+    volumes:
+      - ./data/models:/models:ro
+    environment:
+      WORDSPEAK_PHONEME_MODEL: /models/phoneme-recognition
+      WORDSPEAK_WHISPER_MODEL: /models/native-preparation/whisper-small.en
     expose:
       - "8001"
     healthcheck:

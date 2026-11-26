@@ -139,11 +139,15 @@ try {
         fixtures.push(request.postDataJSON());
         return route.fulfill({ headers, json: session, status: 201 });
       }
-      if (path === "/sessions") return route.fulfill({ headers, json: [session] });
+      if (path === "/sessions")
+        return route.fulfill({ headers, json: { items: [session], next_cursor: null } });
       if (path === "/sessions/1/turns")
         return route.fulfill({
           headers,
-          json: [{ id: 1, text: "She is my friend.", reply: "Where did you meet her?" }],
+          json: {
+            items: [{ id: 1, text: "She is my friend.", reply: "Where did you meet her?" }],
+            next_cursor: null,
+          },
         });
       if (path === "/progress")
         return route.fulfill({ headers, json: { attempts: 1, streak_days: 1, daily: [] } });
@@ -162,6 +166,8 @@ try {
         return;
       }
       const end = JSON.parse(message);
+      if (end.type === "auth") return send({ type: "authenticated" });
+      assert.ok(end.request_id);
       const bytes = Buffer.concat(chunks);
       audio.push({ end, bytes });
       send({ type: "transcript", text: end.text || "She is my friend." });
@@ -264,6 +270,8 @@ try {
   await comparison.routeWebSocket(/\/ws\/audio$/, (socket) => {
     socket.onMessage((message) => {
       if (typeof message !== "string") return;
+      if (JSON.parse(message).type === "auth")
+        return socket.send(JSON.stringify({ type: "authenticated" }));
       socket.send(
         JSON.stringify({
           type: "final",
@@ -304,7 +312,7 @@ try {
   await page.goto(site + "/ipa");
   assert.equal(await page.locator(".sound-card").count(), 44);
   await page.getByRole("button", { name: "Có bài luyện" }).click();
-  assert.equal(await page.locator(".sound-card").count(), 10);
+  assert.equal(await page.locator(".sound-card").count(), 12);
   await page.getByRole("searchbox").fill("she");
   await page.getByRole("link", { name: "Luyện âm" }).click();
   await page.getByRole("heading", { name: "Cách đặt môi và lưỡi" }).waitFor();

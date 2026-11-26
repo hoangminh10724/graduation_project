@@ -1,4 +1,4 @@
-"""Start WordSpeak on localhost with a persistent SQLite database."""
+"""Start WordSpeak on localhost with PostgreSQL or a local SQLite database."""
 
 import argparse
 import hashlib
@@ -67,6 +67,7 @@ def main():
     default_dir = Path(os.environ.get("LOCALAPPDATA", Path.home() / ".local/share")) / "WordSpeak"
     parser.add_argument("--data-dir", type=Path, default=default_dir)
     parser.add_argument("--build", action="store_true", help="Build lại giao diện trước khi chạy.")
+    parser.add_argument("--python", type=Path, help="Dùng môi trường Python đã cài dependencies và PyTorch.")
     args = parser.parse_args()
     node = node_executable()
     check_ports()
@@ -78,7 +79,7 @@ def main():
 
     env = dict(os.environ)
     env.update(
-        DATABASE_URL=f"sqlite:///{(directory / 'wordspeak.db').as_posix()}",
+        DATABASE_URL=os.getenv("DATABASE_URL") or f"sqlite:///{(directory / 'wordspeak.db').as_posix()}",
         JWT_SECRET=secret_file.read_text(encoding="ascii").strip(),
         CORS_ORIGINS="http://localhost:3000,http://127.0.0.1:3000",
         AI_SERVICE_URL="http://127.0.0.1:8001",
@@ -90,8 +91,8 @@ def main():
     next_cli = FRONTEND / "node_modules/next/dist/bin/next"
     if not next_cli.is_file():
         raise RuntimeError("Chưa có dependencies của frontend. Chạy npm install trong thư mục frontend.")
-    python = prepare_python(directory)
-    if args.build or not (FRONTEND / ".next/standalone/server.js").is_file():
+    python = args.python.resolve() if args.python else prepare_python(directory)
+    if args.build or not (FRONTEND / ".next/BUILD_ID").is_file():
         subprocess.run([node, next_cli, "build"], cwd=FRONTEND, env=env, check=True)
 
     subprocess.run([python, "-m", "alembic", "upgrade", "head"], cwd=BACKEND, env=env, check=True)

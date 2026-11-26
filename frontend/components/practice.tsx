@@ -26,7 +26,8 @@ export function Ipa() {
   return (
     <>
       <Title title="Bản đồ IPA">
-        Nghe từ ví dụ và chọn âm bạn muốn tập. Có bài luyện riêng cho 10 âm.
+        Nghe từ ví dụ và chọn âm bạn muốn tập. Có bài luyện riêng cho{" "}
+        {sounds.filter((item) => item.supported).length} âm.
       </Title>
       <div className="stack">
         <Panel className="stack">
@@ -592,7 +593,7 @@ export function Practice() {
                 <Button
                   tone="primary"
                   icon="check"
-                  disabled={checking || recognizing || Boolean(checkResult)}
+                  disabled={context || checking || recognizing || Boolean(checkResult)}
                   onClick={() => void check()}
                 >
                   {checking
@@ -603,7 +604,9 @@ export function Practice() {
                         ? "Đã nhận kết quả"
                         : checkResult === "unknown"
                           ? "Chưa xác nhận kết quả"
-                          : "Kiểm tra"}
+                          : context
+                            ? "Chấm GOP ở chế độ từ đơn"
+                            : "Kiểm tra"}
                 </Button>
                 <Button disabled={checking} onClick={recorder.clear}>
                   Thử lại

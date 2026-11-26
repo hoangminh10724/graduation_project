@@ -4,6 +4,9 @@ from fastapi.staticfiles import StaticFiles
 from .pronunciation_demo import ASSETS, router as demo_router
 
 from .transcription import router as transcription_router
+from .word_assessment import WORDS, assess_word
+from .transcription import MAX_BYTES
+from starlette.concurrency import run_in_threadpool
 from .course.routes import router as course_router
 
 app = FastAPI(title="WordSpeak AI service", version="0.4.0")
@@ -28,8 +31,15 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/assess", deprecated=True)
+@app.post("/assess")
 async def assess(audio: UploadFile = File(...), text: str = Form(...)):
-    """Validated numeric pronunciation scoring is not implemented."""
-    await audio.close()
-    raise HTTPException(501, "Validated pronunciation scoring is not implemented. Use /demo/analyze for an experimental sound comparison.")
+    word = text.strip().lower().strip(".!?")
+    try:
+        if word not in WORDS:
+            raise HTTPException(422, "Choose a supported isolated practice word.")
+        payload = await audio.read(MAX_BYTES + 1)
+    finally:
+        await audio.close()
+    if len(payload) > MAX_BYTES:
+        raise HTTPException(413, "Recording exceeds 8 MiB.")
+    return await run_in_threadpool(assess_word, payload, word)

@@ -24,6 +24,6 @@ def test_legacy_assess_does_not_fabricate_a_score():
         data={"text": "hello world"},
     )
     body = r.json()
-    assert r.status_code == 501
-    assert "not implemented" in body["detail"]
+    assert r.status_code == 422
+    assert "supported" in body["detail"]
     assert "sentence_score" not in body

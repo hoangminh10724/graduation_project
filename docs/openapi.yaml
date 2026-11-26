@@ -483,6 +483,7 @@ paths:
   /assess:
     post:
       summary: (ai-service) Chấm phát âm
+      description: Điểm GOP thử nghiệm cho một từ đơn. Hỗ trợ think, she, see, sit, seat, bed, bad, book, food, pen, ten và key.
       requestBody:
         required: true
         content:
