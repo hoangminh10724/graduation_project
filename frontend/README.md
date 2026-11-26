@@ -4,7 +4,7 @@
 
 ## Chạy trên localhost
 
-Dùng Node.js 22 trở lên và Python. Từ thư mục gốc của dự án, chạy lệnh bên dưới để mở giao diện, FastAPI và AI service cùng lúc. Lệnh tạo môi trường Python, cài các gói cần thiết và cập nhật SQLite ở lần chạy đầu tiên. Nếu chưa có `frontend/node_modules`, chạy `npm install` một lần trong thư mục frontend.
+Dùng Node.js 22 trở lên và Python. Cài frontend bằng `pnpm install --frozen-lockfile` trong thư mục frontend. Từ thư mục gốc, lệnh bên dưới mở giao diện, FastAPI và AI service cùng lúc. Script dùng PostgreSQL khi có `DATABASE_URL` và dùng SQLite theo mặc định. Để chạy nhận dạng, chấm âm vị và Talk với model thật, xem [cấu hình chạy local](../README.md#chạy-từng-phần-không-docker).
 
 ```powershell
 python frontend/scripts/local.py --build
@@ -46,7 +46,7 @@ Micro cần HTTPS hoặc localhost và quyền của trình duyệt. Chrome và 
 | Khu vực | Route và hành vi |
 | --- | --- |
 | Tài khoản | Khách được đưa tới `/dang-nhap`. Đăng nhập hoặc đăng ký thành công sẽ mở trang chủ. Hồ sơ ở `/ho-so`. |
-| Luyện ngữ âm | `/luyen-ngu-am` có 10 âm mục tiêu, bài từ/cụm, đồ hình môi–lưỡi, micro, waveform, nghe lại và **Kiểm tra**. Quá trình kiểm tra gửi WAV mono 16 kHz qua WebSocket. |
+| Luyện ngữ âm | `/luyen-ngu-am` có bài từ/cụm, đồ hình môi–lưỡi và nghe lại. **Kiểm tra** ở chế độ từ đơn gửi WAV mono 16 kHz qua WebSocket để chấm GOP thử nghiệm. |
 | Bản đồ IPA | `/ipa` có 44 âm, bộ lọc nhóm/âm hay nhầm, từ mẫu có nút nghe và đánh dấu từng âm đã luyện. |
 | Luyện ngữ điệu | `/luyen-ngu-dieu` có bốn chủ điểm và sáu mẫu nghe. Người học theo dõi đường cao độ, chọn **Nghe lại bản thu** để phát bản vừa thu và so sánh hai lượt gần nhất. |
 | Từ điển | `/tu-dien` và `/tu-da-luu` xếp từ theo chủ đề. Nút **Chi tiết** mở nghĩa, ví dụ, audio và thao tác học từ. |
@@ -79,7 +79,7 @@ Danh sách chỉnh sửa áp dụng ưu tiên cho giao diện. Flashcards, nhắ
 | D3-08 | `tests/smoke.mjs` và `scripts/plot_results.py`. Biểu đồ thực nghiệm cần CSV của nhóm. |
 | D3-O2 | Tiến độ, chuỗi ngày học, hoạt động gần đây và điểm theo âm từ máy chủ. |
 
-Khung minh họa môi–lưỡi là sơ đồ giáo học tham khảo cách tiếp cận cơ thể của [Adrian Underhill](https://adrianunderhill.com/pronunciation-resources-video-primers/). Âm dễ nhầm là một ví dụ đối chiếu. Khi dịch vụ cung cấp nhãn âm đã nhận dạng, kết quả sẽ dùng nhãn đó. Checkout AI service mặc định trả điểm mẫu và thiếu `/transcribe`, vì vậy giao diện hiển thị thiếu dữ liệu âm vị và thiếu nhận dạng thay vì trình bày điểm mẫu. Talk hỗ trợ tùy chọn nhận dạng từ trình duyệt khi thiết bị có hỗ trợ. Gia sư vẫn cần cấu hình LLM hoạt động. Kết quả âm vị đầy đủ cần AI service thực.
+Khung minh họa môi–lưỡi là sơ đồ giáo học tham khảo cách tiếp cận cơ thể của [Adrian Underhill](https://adrianunderhill.com/pronunciation-resources-video-primers/). Âm dễ nhầm là một ví dụ đối chiếu. AI service dùng Wav2Vec2 để tính điểm cho từ mẫu và dùng Whisper để nhận dạng tiếng nói. Talk cần LLM đang chạy để tạo lời gia sư. Khi thiết bị hỗ trợ, Talk cũng có tùy chọn nhận dạng từ qua trình duyệt.
 
 Ở Luyện ngữ âm, có thể bật **Đối chiếu từ bằng nhận dạng của trình duyệt** trước khi ghi âm. Ví dụ khi luyện *she* và trình duyệt nhận dạng *see*, kết quả hiển thị sơ đồ tham chiếu của cả hai từ. Phần này dùng kết quả nhận dạng từ và không cung cấp điểm âm vị. Tính khả dụng tùy trình duyệt và một số trình duyệt gửi tiếng nói đến máy chủ của nhà cung cấp để nhận dạng. [Tài liệu Web Speech API](https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition)
 
