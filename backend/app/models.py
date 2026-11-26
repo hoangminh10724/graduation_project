@@ -10,6 +10,7 @@ class Base(DeclarativeBase):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = {"sqlite_autoincrement": True}
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
@@ -78,7 +79,8 @@ class AIRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime)
     deadline: Mapped[datetime] = mapped_column(DateTime)
     turn_token: Mapped[str | None] = mapped_column(String(36))
-    __table_args__ = (UniqueConstraint("user_id", "request_id", name="uq_ai_requests_user_request"),)
+    __table_args__ = (UniqueConstraint("user_id", "request_id", name="uq_ai_requests_user_request"),
+                      {"sqlite_autoincrement": True})
 
 
 class Session(Base):
@@ -91,7 +93,7 @@ class Session(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     busy_until: Mapped[datetime | None] = mapped_column(DateTime)
     turn_token: Mapped[str | None] = mapped_column(String(36))
-    __table_args__ = (Index("ix_sessions_user_id_id", "user_id", "id"),)
+    __table_args__ = (Index("ix_sessions_user_id_id", "user_id", "id"), {"sqlite_autoincrement": True})
 
 
 class Deck(Base):

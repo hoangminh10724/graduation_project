@@ -2,17 +2,18 @@
 import json
 from datetime import datetime, timezone
 from tempfile import SpooledTemporaryFile
+from typing import Literal
 
 import bcrypt
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, SecretStr, field_validator
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session as DBSession
 
 from .auth import CurrentUser, DB, unauthorized
 from .limits import enforce_limit
-from .models import Attempt, Card, Deck, DialogueTurn, Review, Session, StudyItem, StudySession, User
+from .models import AccountAction, AIRequest, Attempt, Card, Deck, DialogueTurn, LoginSession, Review, Session, StudyItem, StudySession, UsedRefresh, User
 
 router = APIRouter(prefix="/me")
 MAX_EXPORT_BYTES = 50 * 1024 * 1024
@@ -27,6 +28,61 @@ class ConfirmPassword(BaseModel):
         if not 1 <= len(value.get_secret_value().encode()) <= 72:
             raise ValueError("Password must contain 1 to 72 bytes")
         return value
+
+
+class DeleteAccount(ConfirmPassword):
+    confirmation: Literal["DELETE"]
+
+
+@router.delete("", status_code=204, responses={
+    401: {"description": "Invalid access token or password"},
+    409: {"description": "AI processing or email delivery is still active"},
+    429: {"description": "Deletion request limit exceeded"},
+})
+def delete_account(payload: DeleteAccount, user: CurrentUser, db: DB) -> Response:
+    user_id, version = user.id, user.token_version
+    enforce_limit(db, "account-delete", str(user_id), 3)
+    # User -> Talk sessions -> AI requests matches the auth and Talk lock order.
+    # The no-op update also serializes SQLite writers, unlike FOR UPDATE there.
+    owner = db.scalar(update(User).where(User.id == user_id).values(
+        token_version=User.token_version,
+    ).returning(User).execution_options(populate_existing=True))
+    if owner is None or owner.token_version != version or not bcrypt.checkpw(
+        payload.current_password.get_secret_value().encode(), owner.password_hash.encode()
+    ):
+        raise unauthorized()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    sessions = list(db.scalars(select(Session).where(Session.user_id == user_id).order_by(Session.id).with_for_update()))
+    requests = list(db.scalars(select(AIRequest).where(AIRequest.user_id == user_id).order_by(AIRequest.id).with_for_update()))
+    actions = list(db.scalars(select(AccountAction).where(AccountAction.user_id == user_id).order_by(AccountAction.id).with_for_update()))
+    if (any(row.busy_until is not None and row.busy_until > now for row in sessions)
+            or any(row.status == "running" and row.deadline > now for row in requests)
+            or any(row.delivery_status == "sending" and row.lease_until is not None and row.lease_until > now for row in actions)):
+        raise HTTPException(409, "Wait for active AI/email work to finish or cancel AI requests", headers={"Retry-After": "5"})
+
+    card_ids = select(Card.id).where(Card.user_id == user_id)
+    talk_ids = select(Session.id).where(Session.user_id == user_id)
+    study_ids = select(StudySession.id).where(StudySession.user_id == user_id)
+    login_ids = select(LoginSession.id).where(LoginSession.user_id == user_id)
+    statements = (
+        delete(UsedRefresh).where(UsedRefresh.session_id.in_(login_ids)),
+        delete(LoginSession).where(LoginSession.user_id == user_id),
+        delete(AccountAction).where(AccountAction.user_id == user_id),
+        delete(AIRequest).where(AIRequest.user_id == user_id),
+        delete(Attempt).where(Attempt.user_id == user_id),
+        delete(DialogueTurn).where(DialogueTurn.session_id.in_(talk_ids)),
+        delete(Session).where(Session.user_id == user_id),
+        delete(Review).where(Review.card_id.in_(card_ids)),
+        delete(StudyItem).where(StudyItem.study_session_id.in_(study_ids)),
+        delete(StudySession).where(StudySession.user_id == user_id),
+        delete(Card).where(Card.user_id == user_id),
+        delete(Deck).where(Deck.user_id == user_id),
+        delete(User).where(User.id == user_id),
+    )
+    for statement in statements:
+        db.execute(statement.execution_options(synchronize_session=False))
+    db.commit()
+    return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
 
 class ExportResponse(StreamingResponse):
