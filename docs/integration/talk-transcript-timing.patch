@@ -1,0 +1,92 @@
+--- a/backend/app/speech.py
++++ b/backend/app/speech.py
+@@ -2,7 +2,7 @@
+ from typing import Annotated
+ 
+ import httpx
+-from pydantic import BaseModel, Field, StringConstraints
++from pydantic import BaseModel, Field, StringConstraints, ValidationError, field_validator
+ 
+ 
+ class SpeechError(RuntimeError):
+@@ -29,8 +29,30 @@
+     hints: list[str] = Field(default_factory=list)
+ 
+ 
++class TimedWord(BaseModel):
++    word: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
++    start: float = Field(ge=0, allow_inf_nan=False)
++    end: float = Field(ge=0, allow_inf_nan=False)
++
++
+ class Transcript(BaseModel):
+     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=5000)]
++    words: list[TimedWord] | None = None
++
++    @field_validator("words", mode="wrap")
++    @classmethod
++    def usable_times(cls, value, validate):
++        # Preserve the transcript if an older or partial service has no usable timing.
++        try:
++            words = validate(value)
++        except ValidationError:
++            return None
++        previous_end = 0.0
++        for word in words or ():
++            if word.start < previous_end or word.end < word.start:
++                return None
++            previous_end = word.end
++        return words or None
+ 
+ 
+ async def request_audio(
+@@ -47,7 +69,7 @@
+             )
+             response.raise_for_status()
+             if path == "/transcribe":
+-                return Transcript.model_validate(response.json()).model_dump()
++                return Transcript.model_validate(response.json()).model_dump(exclude_none=True)
+             return Assessment.model_validate(response.json()).model_dump()
+     except (httpx.HTTPError, ValueError) as exc:
+         raise SpeechError(f"Speech service request failed: {path}") from exc
+--- a/backend/app/audio.py
++++ b/backend/app/audio.py
+@@ -39,13 +39,17 @@
+     assessment_task = None
+     try:
+         transcript = payload.text.strip() if payload.text else ""
++        transcript_event = {"type": "transcript", "text": transcript}
+         if not transcript:
+             result = await request_audio("/transcribe", audio, payload.media_type)
+             transcript = result["text"]
++            transcript_event["text"] = transcript
++            if result.get("words"):
++                transcript_event["words"] = result["words"]
+         assessment_task = asyncio.create_task(
+             request_audio("/assess", audio, payload.media_type, transcript)
+         )
+-        await ws.send_json({"type": "transcript", "text": transcript})
++        await ws.send_json(transcript_event)
+         if payload.session_id is not None:
+             async for event in chat_events(db, payload.session_id, transcript, messages):
+                 await ws.send_json(event)
+--- /dev/null
++++ b/backend/tests/test_transcript_timing.py
+@@ -0,0 +1,17 @@
++import pytest
++
++from app.speech import Transcript
++
++
++def test_transcript_preserves_word_times():
++    words = [{"word": "sit", "start": 0.1, "end": 0.3}]
++    result = Transcript.model_validate({"text": "sit", "words": words}).model_dump(exclude_none=True)
++    assert result == {"text": "sit", "words": words}
++
++
++@pytest.mark.parametrize("words", [None, [], "partial", [{"word": "", "start": 0, "end": 1}],
++    [{"word": "sit", "start": 2, "end": 1}], [{"word": "sit", "start": 0, "end": float("nan")}],
++    [{"word": "sit", "start": 0, "end": 1}, {"word": "here", "start": 0.5, "end": 2}]])
++def test_bad_optional_times_preserve_the_text(words):
++    result = Transcript.model_validate({"text": "sit here", "words": words}).model_dump(exclude_none=True)
++    assert result == {"text": "sit here"}

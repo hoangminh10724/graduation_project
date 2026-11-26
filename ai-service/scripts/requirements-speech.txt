@@ -1,0 +1,8 @@
+# Tested with CPython 3.12, Windows x64. Separate from API service dependencies.
+faster-whisper==1.2.1
+ctranslate2==4.9.0
+av==19.0.2
+tokenizers==0.23.3
+onnxruntime==1.31.1
+sherpa-onnx==2.0.1
+numpy==2.5.4

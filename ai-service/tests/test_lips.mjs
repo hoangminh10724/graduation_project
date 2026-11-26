@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {lipGeometry,lipAction} from '../app/demo_static/lips.mjs';
+const iy={lip_spread:.95,lip_round:0,opening:.05};
+const ih={lip_spread:.24,lip_round:0,opening:.25};
+const uw={lip_spread:0,lip_round:1,opening:.05};
+const neutral={lip_spread:.04,lip_round:0,opening:1};
+assert.ok(lipGeometry(iy).rx>lipGeometry(ih).rx);
+assert.ok(lipGeometry(ih).rx>lipGeometry(uw).rx);
+assert.ok(lipGeometry(iy).rx/lipGeometry(iy).ry>5);
+assert.ok(lipGeometry(uw).rx/lipGeometry(uw).ry<1.2);
+assert.ok(lipGeometry(neutral).rx<lipGeometry(iy).rx);
+assert.equal(lipGeometry({...iy,opening:.8}).rx,lipGeometry(iy).rx);
+assert.ok(lipGeometry({...iy,opening:.8}).ry>lipGeometry(iy).ry);
+assert.ok(lipGeometry(iy,{closed:true}).ry<1);
+assert.equal(lipAction(iy),'spread');assert.equal(lipAction(ih),'relaxed');assert.equal(lipAction(uw),'round');
+console.log('Lip spread, rounding, opening and closure distinctions passed.');

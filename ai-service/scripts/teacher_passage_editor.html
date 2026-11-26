@@ -1,0 +1,90 @@
+<form id="editor" hidden>
+<h2 id="selected"></h2>
+<p>Listen to the original recording. Adjust the estimated boundaries to include one complete word before saving your decision.</p>
+<label>Word start in seconds <input id="begin" type="number" step="any" min="0" required></label>
+<label>Word end in seconds <input id="end" type="number" step="any" min="0" required></label>
+<button type="button" id="preview">Hear this interval</button>
+<label>Your listening note <textarea id="observation" required></textarea></label>
+<fieldset id="rating" hidden><legend id="focus"></legend>
+<label>After listening, how did the target sound?
+<select id="verdict"><option value="">Save listening note only</option>
+<option value="acceptable">Acceptable in this context</option><option value="difference">I hear a different or missing sound</option>
+<option value="unclear">I cannot tell from this recording</option></select></label>
+<label id="heardLabel" hidden>Sound actually heard (IPA without slashes, or “deletion”) <input id="heard"></label>
+</fieldset>
+<button>Save reviewed passage</button>
+</form>
+<p id="status" role="status"></p><button id="export" disabled>Export reviewed passages</button>
+<script>
+const get=id=>document.getElementById(id);
+const decisions=new Map();
+let source=null, selection=null, previewEnd=null;
+function updateHeard(){
+  const needed=get('verdict').value==='difference';
+  get('heardLabel').hidden=!needed;
+  get('heard').required=needed;
+  if(!needed)get('heard').value='';
+}
+get('verdict').addEventListener('change',updateHeard);
+function stopPreview(){
+  if(source){source.pause();source.ontimeupdate=null;}
+  previewEnd=null;
+}
+document.addEventListener('click',async event=>{
+  const button=event.target.closest('button[data-word]');
+  if(!button)return;
+  stopPreview();
+  const section=button.closest('section'),record=section.closest('details');
+  source=record.querySelector('audio');
+  selection={recording:record.dataset.recording,source_sha256:record.dataset.hash,playback_sha256:record.dataset.playback,
+    item:Number(section.dataset.item),word:button.dataset.word,asr_start:button.dataset.start===undefined?null:Number(button.dataset.start)};
+  const key=JSON.stringify(selection),saved=decisions.get(key);
+  section.append(get('editor'));get('editor').hidden=false;
+  get('selected').textContent='Review '+selection.recording+' · '+selection.word;
+  get('begin').value=saved?.start??button.dataset.start??'';
+  get('end').value=saved?.end??button.dataset.end??'';
+  get('observation').value=saved?.note??'';
+  const phone=button.dataset.phone;
+  get('rating').hidden=!phone;
+  get('focus').textContent=phone?'Tutor comparison for /'+phone+'/ in “'+selection.word+'”':'';
+  get('rating').dataset.phone=phone;
+  get('verdict').value=saved?.verdict??'';
+  get('heard').value=saved?.heard_phone??'';
+  updateHeard();
+  get('status').textContent='';
+  if(button.dataset.start!==undefined){
+    source.currentTime=Math.max(0,Number(button.dataset.start)-.35);
+    try{await source.play()}catch{source.focus()}
+  }
+});
+function interval(){
+  const start=get('begin').valueAsNumber,end=get('end').valueAsNumber;
+  if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<=start||
+     !Number.isFinite(source.duration)||end>source.duration+.001){
+    get('status').textContent='Play the recording and enter start and end times inside it.';return null;
+  }
+  return {start,end};
+}
+get('preview').addEventListener('click',async()=>{
+  const range=interval();if(!range)return;
+  stopPreview();source.currentTime=range.start;previewEnd=range.end;
+  source.ontimeupdate=()=>{if(source.currentTime>=previewEnd)stopPreview()};
+  try{await source.play()}catch{get('status').textContent='Use the recording playback controls to listen.'}
+});
+get('editor').addEventListener('submit',event=>{
+  event.preventDefault();
+  const range=interval(),note=get('observation').value.trim();if(!range||!note)return;
+  const verdict=get('verdict').value,heard=get('heard').value.trim();
+  if(verdict==='difference' && (!heard || heard.includes('/'))){
+    get('status').textContent='Enter the heard sound without slashes, or enter deletion.';return;
+  }
+  const rating=verdict?{target_phone:get('rating').dataset.phone,verdict,heard_phone:heard}:{};
+  decisions.set(JSON.stringify(selection),{...selection,...range,note,...rating});
+  get('status').textContent=decisions.size+' reviewed passage(s) in this tab. Export before closing.';
+  get('export').disabled=false;
+});
+get('export').addEventListener('click',()=>{
+  const link=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify([...decisions.values()],null,2)],{type:'application/json'}));
+  link.href=url;link.download='reviewed-passages.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+});
+</script></html>

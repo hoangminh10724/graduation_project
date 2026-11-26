@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>WordSpeak · Sound lab</title><link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/demo/assets/style.css?v=american-sounds-1">
+</head>
+<body>
+<main>
+  <header><a class="brand" href="/demo">WordSpeak<span>Sound lab</span></a><span id="build-badge" class="badge">Loading sound catalog</span></header>
+  <p><a href="/demo/course">Open the guided pronunciation course →</a></p>
+  <section class="intro"><p class="eyebrow">Notice a change. Make it yours.</p><h1>Find the movement.<br>Say what you mean.</h1>
+    <p id="practice-intro">Record a word, listen back, then explore one sound you want to change.</p>
+    <p id="practice-notice" class="notice">The illustrations show reference sounds, not the measured position of your tongue. Predictions are provisional; this demo does not give pronunciation scores.</p>
+    <p id="accent-note" class="muted"></p>
+    <div id="sound-picker" class="sound-picker"><div class="sound-filters"><label for="sound-family">Browse sounds<select id="sound-family"><option value="all">All sounds</option><option value="vowel">Vowels</option><option value="consonant">Consonants</option></select></label><label for="sound-search">Find a word or sound<input id="sound-search" type="search" placeholder="For example: bird, sing, ʃ" autocomplete="off"></label></div><p id="sound-count" class="muted" role="status"></p><div id="sound-targets" class="sound-targets" aria-label="American English practice sounds"></div></div>
+  </section>
+  <nav class="practice-modes" aria-label="Practice area"><button id="mode-sounds" aria-pressed="true" aria-controls="sound-workspace" disabled>Sounds</button><button id="mode-prosody" class="secondary" aria-pressed="false" aria-controls="prosody-workspace" disabled>Phrases &amp; conversation</button><a id="account-review" href="/demo/review" hidden>Review account cards</a></nav>
+  <div id="sound-workspace" class="workspace">
+    <section class="panel input-panel" aria-labelledby="input-title"><h2 id="input-title">Try a word</h2>
+      <label for="prompt">Choose your word</label><select id="prompt" disabled></select>
+      <details id="sound-table" hidden></details>
+      <details id="listen-contrast"><summary>Listen for a sound difference</summary></details>
+      <button id="save-word" class="secondary" disabled>Save word for conversation</button>
+      <label for="input-scope">What will you say?</label><select id="input-scope"><option value="word">Just the word</option><option value="context">Word inside the suggested phrase</option></select>
+      <p id="prompt-help" class="muted"></p>
+      <label for="mic-device">Microphone</label><select id="mic-device"><option value="">System default microphone</option></select>
+      <label for="mic-gain">Microphone input boost: <output id="mic-gain-value" for="mic-gain">1×</output></label>
+      <input id="mic-gain" type="range" min="1" max="8" step="0.5" value="1" aria-describedby="mic-gain-help">
+      <p id="mic-gain-help" class="muted">Adjust before or after recording. The current microphone clip updates when you release the slider. Boost affects playback and analysis; uploaded files keep their original level.</p>
+      <meter id="mic-level" min="0" max="1" low="0.05" high="0.9" optimum="0.5" value="0" aria-label="Recorded microphone peak level"></meter>
+      <p id="mic-level-status" class="muted" role="status">The level meter runs while recording.</p>
+      <div class="actions"><button id="record" disabled>Record word</button><button id="stop" class="secondary" disabled>Stop</button></div>
+      <label class="file-label" for="file">Or choose an audio file</label><input id="file" type="file" accept="audio/*" disabled>
+      <p id="recording-help" class="muted">Say just the selected word once. Recording stops after 3 seconds. Leave a short pause before and after it.</p>
+      <div id="selection" hidden><div class="times"><label>Start (seconds)<input id="start" type="number" min="0" step="0.001" value="0"></label><label>End (seconds)<input id="end" type="number" min="0.25" step="0.001" value="3"></label></div><button id="prepare" class="secondary">Prepare selected word</button></div>
+      <audio id="input-audio" aria-label="Current word recording" controls hidden></audio>
+      <button id="keep-take" class="secondary" disabled>Keep this take for comparison</button>
+      <section id="first-take" hidden><p id="first-take-label"></p>
+        <audio id="first-audio" aria-label="Earlier word recording" controls></audio>
+        <button id="clear-take" class="secondary">Clear earlier take</button>
+      </section>
+      <button id="save-audio" class="secondary" disabled>Save audio</button>
+      <button id="analyze" class="wide" disabled>Analyze word</button>
+      <p id="input-status" role="status" aria-live="polite" class="muted">Loading prompts…</p>
+      <p class="privacy">Analyze word sends the selected audio to the speech service. Temporary word uploads are removed after analysis.</p>
+      <hr><h2>Replay development examples</h2><p class="muted">Previously computed results from your recordings. These replay cached predictions, rather than running live analysis.</p>
+      <div id="examples" class="example-list"></div>
+    </section>
+    <section class="panel result-panel" aria-labelledby="result-title"><div class="result-heading"><h2 id="result-title">Sound comparison</h2><span id="mode" class="badge">Ready to explore</span></div>
+      <p id="result-message" aria-live="polite">Choose an example or record a word to begin.</p>
+      <button id="select-target-word" class="secondary" hidden>Select the word in my recording</button>
+      <p id="result-state" class="state" hidden></p>
+      <p id="practice-cue" class="notice" hidden></p>
+      <audio id="result-audio" controls hidden></audio>
+      <section id="recording-feedback" class="recording-feedback" aria-label="Your recording and how to adjust" aria-live="polite" hidden></section>
+      <section id="teaching-guide" class="teaching-guide" aria-label="Guided physical pronunciation practice" hidden></section>
+      <p id="reference-summary" class="muted" hidden></p>
+      <details id="reference-details" open><summary>Sound reference</summary>
+        <div id="reference-grid" class="guide-grid single-reference"><div id="predicted-column" hidden><h3 id="predicted-title">Model candidate: reference position</h3><div id="predicted-guide" class="guide-placeholder">Record one word to compare a model candidate with the target reference.</div></div><div><h3 id="target-title">Target reference</h3><div id="target-guide" class="guide-placeholder">Choose a word to see its target.</div></div></div>
+      </details>
+      <details id="feedback-details" hidden><summary>Detailed sound differences (optional)</summary><section id="articulation-feedback" class="feedback" hidden aria-label="Sound difference and adjustment"></section></details>
+      <details id="teacher-section" hidden><summary>Original teacher feedback</summary><p id="teacher"></p></details>
+      <details><summary>Model output details</summary><ul id="reasons" class="reasons"></ul><p>Raw sound sequence: <span id="raw" class="phones">—</span></p><p id="technical">No analysis yet.</p></details>
+      <button id="export" class="secondary" disabled>Save this result</button>
+    </section>
+  </div>
+  <section id="prosody-workspace" class="panel prosody-panel" aria-label="Stress, intonation and connected speech practice" hidden></section>
+  <footer><p>Reference diagrams are simplified and not to scale. Sound labels do not reveal the speaker’s actual tongue position, and vowel duration is not graded.</p><p id="sources"></p><p id="service-status" role="status">Checking local service…</p><p>General American: 17 vowel practice entries and 24 consonants, plus r-vowel combinations. Recognition accuracy and stress assessment have not been established.</p></footer>
+</main>
+<script type="module" src="/demo/assets/app.mjs?v=american-sounds-1"></script>
+</body>
+</html>
