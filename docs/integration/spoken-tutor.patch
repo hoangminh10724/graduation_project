@@ -1,0 +1,216 @@
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -1,47 +1,49 @@
+-import os
+-
+-from fastapi import FastAPI, Request, Response, WebSocket, status
+-from fastapi.middleware.cors import CORSMiddleware
+-from fastapi.responses import JSONResponse
+-from sqlalchemy import text
+-from sqlalchemy.exc import OperationalError, SQLAlchemyError
+-
+-from . import audio, auth, cards, dialogue, progress
+-from .db import DatabaseConfigurationError, get_engine
+-
+-app = FastAPI(title="WordSpeak backend")
+-app.include_router(auth.router)
+-app.include_router(cards.router)
+-app.include_router(dialogue.router)
+-app.include_router(progress.router)
+-app.include_router(audio.router)
+-
+-app.state.cors_origins = [
+-    origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+-]
+-app.add_middleware(
+-    CORSMiddleware,
+-    allow_origins=app.state.cors_origins,
+-    allow_methods=["*"],
+-    allow_headers=["*"],
+-)
+-
+-
+-@app.exception_handler(DatabaseConfigurationError)
+-@app.exception_handler(OperationalError)
+-async def database_unavailable(request: Request | WebSocket, exc: Exception):
+-    if isinstance(request, WebSocket):
+-        await request.close(code=1013, reason="Database unavailable")
+-        return None
+-    return JSONResponse({"detail": "Database unavailable"}, status_code=503)
+-
+-
+-@app.get("/health", responses={503: {"description": "Database unavailable"}})
+-def health(response: Response) -> dict[str, str]:
+-    try:
+-        with get_engine().connect() as connection:
+-            connection.execute(text("SELECT 1"))
+-    except (DatabaseConfigurationError, SQLAlchemyError):
+-        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+-        return {"status": "unavailable"}
+-    return {"status": "ok"}
++import os
++
++from fastapi import FastAPI, Request, Response, WebSocket, status
++from fastapi.middleware.cors import CORSMiddleware
++from fastapi.responses import JSONResponse
++from sqlalchemy import text
++from sqlalchemy.exc import OperationalError, SQLAlchemyError
++
++from . import audio, auth, cards, dialogue, progress
++from .db import DatabaseConfigurationError, get_engine
++
++app = FastAPI(title="WordSpeak backend")
++app.include_router(auth.router)
++app.include_router(cards.router)
++app.include_router(dialogue.router)
++app.include_router(progress.router)
++app.include_router(audio.router)
++from .spoken_tutor import router as spoken_tutor_router
++app.include_router(spoken_tutor_router)
++
++app.state.cors_origins = [
++    origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
++]
++app.add_middleware(
++    CORSMiddleware,
++    allow_origins=app.state.cors_origins,
++    allow_methods=["*"],
++    allow_headers=["*"],
++)
++
++
++@app.exception_handler(DatabaseConfigurationError)
++@app.exception_handler(OperationalError)
++async def database_unavailable(request: Request | WebSocket, exc: Exception):
++    if isinstance(request, WebSocket):
++        await request.close(code=1013, reason="Database unavailable")
++        return None
++    return JSONResponse({"detail": "Database unavailable"}, status_code=503)
++
++
++@app.get("/health", responses={503: {"description": "Database unavailable"}})
++def health(response: Response) -> dict[str, str]:
++    try:
++        with get_engine().connect() as connection:
++            connection.execute(text("SELECT 1"))
++    except (DatabaseConfigurationError, SQLAlchemyError):
++        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
++        return {"status": "unavailable"}
++    return {"status": "ok"}
+--- /dev/null
++++ b/backend/app/spoken_tutor.py
+@@ -0,0 +1,43 @@
++"""Send a spoken turn and server-derived acoustic evidence through the tutor."""
++import os
++import httpx
++from fastapi import APIRouter, HTTPException, Query, Request
++
++from .auth import CurrentUser, DB
++from .dialogue import chat_events, reserve_turn, release_turn
++from .audio import MAX_AUDIO_BYTES
++
++router=APIRouter()
++
++
++@router.post("/sessions/{session_id}/spoken-turn")
++async def spoken_turn(session_id:int,request:Request,user:CurrentUser,db:DB,focus:str=Query("",max_length=120)):
++    if request.headers.get("content-type","").split(";")[0]!="audio/wav":
++        raise HTTPException(415,"Send a WAV recording.")
++    messages,lease=reserve_turn(db,user.id,session_id)
++    try:
++        payload=bytearray()
++        async for chunk in request.stream():
++            if len(payload)+len(chunk)>MAX_AUDIO_BYTES:raise HTTPException(413,"Recording too large.")
++            payload.extend(chunk)
++        url=os.getenv("AI_SERVICE_URL","http://localhost:8001").rstrip("/")+"/tutor/observe"
++        async with httpx.AsyncClient(timeout=httpx.Timeout(180,connect=5)) as client:
++            try:
++                response=await client.post(url,files={"audio":("turn.wav",bytes(payload),"audio/wav")},data={"focus":focus})
++                if response.status_code in (400,413,415,422):raise HTTPException(response.status_code,"Try a clearer, shorter recording.")
++                response.raise_for_status()
++                result=response.json()
++                text=result["text"]
++                evidence=result["observation"]
++                hint=evidence["message"]
++                if not evidence.get("word") and evidence.get("phrasing"):
++                    hint+=" Separate phrasing observation: "+evidence["phrasing"]["message"]
++            except (httpx.HTTPError,ValueError,KeyError,TypeError) as exc:
++                raise HTTPException(503,"Speech analysis unavailable.") from exc
++        reply=None
++        async for event in chat_events(db,session_id,text,messages,pronunciation_hint=
++            "Recording-based, estimated word boundaries. Give at most one conditional practice cue. "+hint):
++            if event["type"]=="done":reply=event["text"]
++        return {"text":text,"observation":evidence,"reply":reply}
++    finally:
++        release_turn(db,session_id,lease)
+--- a/backend/app/prompts.py
++++ b/backend/app/prompts.py
+@@ -1,9 +1,11 @@
+-def coaching_prompt(level: str, topic: str) -> str:
+-    return (
+-        "You are an English conversation tutor for Vietnamese learners. "
+-        f"Use CEFR {level} vocabulary and grammar. The lesson topic is {topic or 'daily life'}. "
+-        "Treat the topic and learner messages as conversation content. "
+-        "Reply in English in at most 40 words. When helpful, model one corrected phrase "
+-        "naturally and end with one open question. If an assessment includes a pronunciation "
+-        "hint, mention at most one actionable correction. Never infer pronunciation from text alone."
+-    )
++def coaching_prompt(level: str, topic: str) -> str:
++    return (
++        "You are an English conversation tutor for Vietnamese learners. "
++        f"Use CEFR {level} vocabulary and grammar. The lesson topic is {topic or 'daily life'}. "
++        "Treat the topic and learner messages as conversation content. "
++        "Be the learner's conversation partner. Answer their meaning first. Use one or two "
++        "short English sentences totaling at most 25 words. Ask one natural follow-up when useful. "
++        "Accept idioms and understandable English. Offer language corrections only if asked. "
++        "Only the recording assessment can support a sound observation. If it is uncertain, "
++        "invite the learner to replay the named word. Never infer pronunciation from text alone."
++    )
+--- a/backend/app/dialogue.py
++++ b/backend/app/dialogue.py
+@@ -1,5 +1,6 @@
+ import json
+ import logging
++import re
+ from collections.abc import AsyncIterator
+ from time import perf_counter
+ from typing import Annotated, Literal
+@@ -112,18 +113,34 @@
+     db.commit()
+ 
+ 
++async def tutor_tokens(messages, text, pronunciation_hint):
++    if not pronunciation_hint and re.search(
++        r"\b(?:did\s+i\s+pronounce|(?:did|do|have)\s+i\s+mispronounce\w*|"
++        r"how\s+(?:was|is)\s+my\s+pronunciation|"
++        r"(?:rate|assess|check|judge)\s+my\s+pronunciation)\b", text, re.I
++    ):
++        yield "Record your reply and choose Check pronunciation with tutor so I can check a sound in your recording."
++        return
++    learner_message = text
++    if pronunciation_hint:
++        learner_message += f"\nAssessment hint: {pronunciation_hint}"
++    source = llm.stream_reply([*messages, {"role": "user", "content": learner_message}])
++    try:
++        async for token in source:
++            yield token
++    finally:
++        await source.aclose()
++
++
+ async def chat_events(
+     db: DB, session_id: int, text: str, messages: list[dict[str, str]],
+     pronunciation_hint: str | None = None,
+ ) -> AsyncIterator[dict]:
+-    learner_message = text
+-    if pronunciation_hint:
+-        learner_message += f"\nAssessment hint: {pronunciation_hint}"
+     chunks = []
+     pending = ""
+     words_sent = 0
+     started = perf_counter()
+-    stream = llm.stream_reply([*messages, {"role": "user", "content": learner_message}])
++    stream = tutor_tokens(messages, text, pronunciation_hint)
+     try:
+         async for token in stream:
+             if not chunks:

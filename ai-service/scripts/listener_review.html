@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WordSpeak listener review</title>
+<style>
+body{max-width:42rem;margin:2rem auto;padding:0 1rem;color:#193e35;font:1rem/1.55 system-ui,sans-serif}
+label{display:block;font-weight:600;margin:.8rem 0 .25rem}audio,input,textarea,select{box-sizing:border-box;width:100%}
+input,textarea,select,button{font:inherit;padding:.5rem}button{margin:.5rem .4rem .25rem 0}
+</style>
+<h1>What did you understand?</h1>
+<p>Work independently. Listen once, then write the words you heard. Use […] for words you missed. You may replay the clip after recording your first impression.</p>
+<label for="reviewer">Your reviewer code</label><input id="reviewer" maxlength="64" autocomplete="off">
+<button id="start">Open my review</button>
+<section id="task" hidden>
+<h2 id="progress"></h2>
+<audio id="audio" controls preload="metadata"></audio>
+<label for="effort">How much could you understand on first listening?</label>
+<select id="effort"><option value="">Choose an observation</option><option value="clear">All or nearly all words</option><option value="partial">Some words</option><option value="none">No words</option><option value="technical">Playback or recording problem</option></select>
+<label for="heard">Words you heard</label><textarea id="heard" rows="3"></textarea>
+<button id="previous">Previous</button><button id="next">Save and continue</button><button id="download">Export saved observations</button>
+</section>
+<p id="status" role="status"></p>
+<script>
+const batch="__BATCH__",ids="__IDS__";
+const el=id=>document.getElementById(id);
+let observations={},index=0,key,reviewer,plays=0;
+function show(){
+ const id=ids[index],saved=observations[id];
+ el('progress').textContent='Recording '+(index+1)+' of '+ids.length+' · '+Object.keys(observations).length+' saved';
+ el('audio').src='audio/'+id+'.wav';el('heard').value=saved?.heard||'';el('effort').value=saved?.effort||'';
+ plays=saved?.plays||0;el('previous').disabled=index===0;el('next').textContent=index===ids.length-1?'Save final observation':'Save and continue';
+}
+el('audio').addEventListener('playing',()=>{plays++;});
+function save(){
+ const effort=el('effort').value, heard=el('heard').value.trim();
+ if(!effort || (!plays && effort!=='technical') || (['clear','partial'].includes(effort) && !heard)){
+  el('status').textContent='Listen, choose an observation, and enter the words you understood. For a playback problem, select that option.';return false;
+ }
+ observations[ids[index]]={effort,heard,plays};
+ try{localStorage.setItem(key,JSON.stringify(observations));el('status').textContent='Observation saved.';}
+ catch{el('status').textContent='Saved in this tab. Export before closing.';}
+ return true;
+}
+el('start').onclick=()=>{
+ reviewer=el('reviewer').value.trim();if(!reviewer){el('status').textContent='Enter a reviewer code.';return;}
+ key='wordspeak.listener.'+batch+'.'+reviewer;
+ try{observations=JSON.parse(localStorage.getItem(key))||{};}catch{observations={};}
+ index=ids.findIndex(id=>!observations[id]);if(index<0)index=0;
+ el('reviewer').disabled=el('start').disabled=true;el('task').hidden=false;el('status').textContent='';show();
+};
+el('previous').onclick=()=>{if((el('effort').value || el('heard').value) && !save())return;index--;show();};
+el('next').onclick=()=>{if(save()){index=Math.min(ids.length-1,index+1);show();}};
+el('download').onclick=()=>{
+ const url=URL.createObjectURL(new Blob([JSON.stringify({batch,reviewer,observations},null,2)],{type:'application/json'}));
+ const link=document.createElement('a');link.href=url;link.download='listener-observations.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+</script>
+</html>

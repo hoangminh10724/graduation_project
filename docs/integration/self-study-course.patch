@@ -1,0 +1,176 @@
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -17,3 +17,5 @@
+ from .spoken_tutor import router as spoken_tutor_router
+ app.include_router(spoken_tutor_router)
++from .course import router as course_router
++app.include_router(course_router)
+ 
+--- a/docs/nginx.conf
++++ b/docs/nginx.conf
+@@ -17,4 +17,11 @@
+ 
++    location /demo/course {
++        proxy_pass http://ai-service:8001;
++    }
++
++    location /tutor/observe {
++        proxy_pass http://ai-service:8001;
++    }
++
+     location = /demo {
+         proxy_pass http://ai-service:8001;
+     }
+--- /dev/null
++++ b/backend/app/course.py
+@@ -0,0 +1,75 @@
++"""Account-owned course attempts. The speech service owns catalog versions and marking."""
++import hashlib
++import os
++from uuid import UUID
++import httpx
++from fastapi import APIRouter, HTTPException
++from pydantic import BaseModel, Field
++from sqlalchemy import ForeignKey, Index, JSON, String, UniqueConstraint, select
++from sqlalchemy.exc import IntegrityError
++from sqlalchemy.orm import Mapped, mapped_column
++from .auth import CurrentUser, DB
++from .models import Base, Card
++
++router = APIRouter(prefix="/course")
++
++class CourseAttempt(Base):
++    __tablename__ = "course_attempts"
++    __table_args__ = (
++        UniqueConstraint("user_id","request_id",name="uq_course_attempt_user_request"),
++        Index("ix_course_attempts_user_id_id","user_id","id"),
++    )
++    id: Mapped[int] = mapped_column(primary_key=True)
++    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
++    request_id: Mapped[str] = mapped_column(String(36))
++    fingerprint: Mapped[str] = mapped_column(String(64))
++    result: Mapped[dict] = mapped_column(JSON)
++
++class Attempt(BaseModel):
++    attempt_id: UUID
++    version: str = Field(max_length=80)
++    lesson: str = Field(max_length=80)
++    exercise: str = Field(max_length=24)
++    answer: str = Field(max_length=500)
++
++async def course_service(route, data):
++    url=os.getenv("AI_SERVICE_URL","http://localhost:8001").rstrip("/")+"/demo/course/"+route
++    try:
++        async with httpx.AsyncClient(timeout=20) as client:
++            response=await client.post(url,json=data)
++    except httpx.HTTPError:
++        raise HTTPException(503,"Course marking is unavailable. Retry this attempt.") from None
++    if response.status_code!=200:
++        raise HTTPException(response.status_code if response.status_code in (404,409,422) else 503,"Reopen this exercise or retry.")
++    return response.json()
++
++def replay(row, fingerprint):
++    if row.fingerprint!=fingerprint:
++        raise HTTPException(409,"Attempt ID already belongs to a different answer.")
++    return row.result
++
++@router.post("/attempts")
++async def submit(payload:Attempt,user:CurrentUser,db:DB):
++    uid=user.id
++    key=str(payload.attempt_id)
++    fingerprint=hashlib.sha256(payload.model_dump_json().encode()).hexdigest()
++    query=select(CourseAttempt).where(CourseAttempt.user_id==uid,CourseAttempt.request_id==key)
++    previous=db.scalar(query)
++    if previous:return replay(previous,fingerprint)
++    result=await course_service("grade",payload.model_dump(mode="json"))
++    db.add(CourseAttempt(user_id=uid,request_id=key,fingerprint=fingerprint,result=result))
++    try:
++        db.commit()
++    except IntegrityError:
++        db.rollback()
++        previous=db.scalar(query)
++        if previous:return replay(previous,fingerprint)
++        raise
++    return result
++
++@router.get("/state")
++async def state(user:CurrentUser,db:DB):
++    events=db.scalars(select(CourseAttempt.result).where(CourseAttempt.user_id==user.id).order_by(CourseAttempt.id)).all()
++    return await course_service("study",list(events))
++
++@router.get("/words")
++def words(user:CurrentUser,db:DB):
++    cards=db.scalars(select(Card).where(Card.user_id==user.id,Card.practice_key.is_not(None)).order_by(Card.id.desc()))
++    return [{"word":c.front,"situation":c.situation or ""} for c in cards]
+--- /dev/null
++++ b/backend/migrations/versions/0005_course_attempts.py
+@@ -0,0 +1,20 @@
++"""Persist versioned learner attempts with retry-safe request identities."""
++import sqlalchemy as sa
++from alembic import op
++
++revision="0005_course_attempts"
++down_revision="0004_practice_words"
++branch_labels=None
++depends_on=None
++
++def upgrade():
++    op.create_table("course_attempts",
++        sa.Column("id",sa.Integer,primary_key=True),
++        sa.Column("user_id",sa.Integer,sa.ForeignKey("users.id"),nullable=False),
++        sa.Column("request_id",sa.String(36),nullable=False),
++        sa.Column("fingerprint",sa.String(64),nullable=False),
++        sa.Column("result",sa.JSON,nullable=False),
++        sa.UniqueConstraint("user_id","request_id",name="uq_course_attempt_user_request"))
++    op.create_index("ix_course_attempts_user_id_id","course_attempts",["user_id","id"])
++
++def downgrade():
++    op.drop_index("ix_course_attempts_user_id_id",table_name="course_attempts")
++    op.drop_table("course_attempts")
+--- a/frontend/app/page.tsx
++++ b/frontend/app/page.tsx
+@@ -7,3 +7,4 @@
+       </p>
++      <a className="mt-4 block underline" href="/demo/course">Bắt đầu khóa học phát âm</a>
+       <a className="mt-4 block underline" href="/demo">Luyện âm và hội thoại</a>
+       <a className="mt-4 inline-block underline" href="/demo/review">Luyện hội thoại với thẻ đến hạn</a>
+--- a/backend/migrations/env.py
++++ b/backend/migrations/env.py
+@@ -3,3 +3,4 @@
+ from app.db import database_url, get_engine
+ from app.models import Base
++from app.course import CourseAttempt  # register the additional table for Alembic
+ 
+--- /dev/null
++++ b/backend/tests/test_course.py
+@@ -0,0 +1,29 @@
++from uuid import uuid4
++
++from test_cards import api, register
++from app import course
++
++def test_owned_retries_resume_and_words(api,monkeypatch):
++    client,_=api
++    events=[]
++    async def service(route,data):
++        if route=="study":return {"events":data}
++        events.append(data)
++        return {**{k:data[k] for k in ("version","lesson","exercise","attempt_id")},"skill":"IPA","outcome":"correct","day":"2026-11-24"}
++    monkeypatch.setattr(course,"course_service",service)
++    owner=register(client,"learner@example.com")
++    other=register(client,"second@example.com")
++    body={"attempt_id":str(uuid4()),"version":"test","lesson":"ship-01","exercise":"p4","answer":"sit"}
++    assert client.post("/course/attempts",json=body).status_code==401
++    first=client.post("/course/attempts",headers=owner,json=body)
++    assert first.status_code==200
++    assert client.post("/course/attempts",headers=owner,json=body).json()==first.json()
++    assert client.post("/course/attempts",headers=owner,json={**body,"answer":"x"}).status_code==409
++    assert len(events)==1
++    assert client.get("/course/state",headers=other).json()=={"events":[]}
++    login=client.post("/auth/login",json={"email":"learner@example.com","password":"test-pass"}).json()
++    again={"Authorization":"Bearer "+login["access_token"]}
++    assert client.get("/course/state",headers=again).json()["events"]==[first.json()]
++    assert client.put("/practice-words",headers=again,json={"word":"rain check","situation":"decline an invitation"}).status_code==200
++    assert client.get("/course/words",headers=again).json()[0]["word"]=="rain check"
++    assert client.get("/course/words",headers=other).json()==[]
+

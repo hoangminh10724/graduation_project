@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review due words · WordSpeak</title><link rel="stylesheet" href="/demo/assets/style.css"></head>
+<body><main>
+<header><a class="brand" href="/">WordSpeak<span>Conversation review</span></a><button id="logout" class="secondary" hidden>Sign out</button></header>
+<h1>Practise your due words</h1>
+<form class="panel" id="login">
+<label for="email">Account email</label><input type="email" id="email" required autocomplete="username">
+<label for="password">Password</label><input type="password" id="password" required autocomplete="current-password">
+<p id="password-help" hidden>Use at least 8 characters, up to 72 UTF-8 bytes.</p>
+<button id="auth-submit" type="submit">Sign in</button>
+<button id="auth-switch" type="button" class="secondary">Create a new account</button>
+</form>
+<p id="account-status" role="status"></p>
+<button class="secondary" id="refresh" hidden>Check due cards</button>
+<details id="vocabulary" class="panel" hidden><summary>Save an expression to my account</summary>
+<form id="save-expression">
+<button type="button" class="secondary" id="show-local">Choose from this device</button>
+<label id="local-label" for="local-expression" hidden>Device word bank</label><select id="local-expression" hidden></select>
+<label for="expression">Word or expression</label><input id="expression" required maxlength="100" autocomplete="off">
+<label for="example">Practice sentence (optional)</label><input id="example" maxlength="500">
+<label for="situation">Question or situation (optional)</label><input id="situation" maxlength="500">
+<button type="submit">Save expression</button>
+</form></details>
+<section class="panel" id="card" hidden>
+<p id="remaining"></p>
+<details id="card-note"><summary>Show card back</summary><p id="back"></p></details>
+<section id="practice" class="prosody-panel"></section>
+
+<fieldset id="ratings"><legend>How easily could you recall this card?</legend>
+<button data-rating="1">Again</button><button data-rating="2">Hard</button><button data-rating="3">Good</button><button data-rating="4">Easy</button>
+</fieldset>
+<button id="retry" hidden>Retry saving this review</button>
+</section>
+<section class="panel" id="saved-conversations" hidden>
+<button id="list-sessions" class="secondary">Find saved conversations</button>
+<div id="session-picker" hidden><label for="session-list">Saved conversation</label><select id="session-list"></select><button id="resume-session">Resume conversation</button></div>
+<p id="session-status" role="status"></p></section>
+<section id="resumed-practice" class="prosody-panel" hidden></section>
+<details id="conversation" class="panel" hidden><summary>Continue with a conversation tutor</summary>
+<p>After recording, choose Check pronunciation with tutor to send the audio for a sound check and conversation reply. Or send an edited transcript or typed turn below for a text conversation. Completed conversation turns are saved in your account.</p>
+<ol id="dialogue-history"></ol>
+<form id="dialogue-form"><label for="dialogue-text">Your turn</label><textarea id="dialogue-text" required maxlength="5000" rows="3"></textarea>
+<button type="submit">Send to tutor</button></form><p id="dialogue-status" role="status"></p>
+</details>
+</main><script type="module" src="/demo/assets/account-review.mjs"></script></body></html>

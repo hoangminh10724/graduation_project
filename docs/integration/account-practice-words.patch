@@ -1,0 +1,162 @@
+--- a/backend/app/models.py
++++ b/backend/app/models.py
+@@ -1,6 +1,6 @@
+ from datetime import datetime
+ 
+-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
++from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, func
+ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+ 
+ 
+@@ -30,6 +30,9 @@
+ class Card(Base):
+     """Thẻ ôn tập FSRS."""
+     __tablename__ = "cards"
++    __table_args__ = (Index("uq_cards_user_practice_key", "user_id", "practice_key", unique=True),)
++    practice_key: Mapped[str | None] = mapped_column(String(300))
++    situation: Mapped[str | None] = mapped_column(Text)
+     id: Mapped[int] = mapped_column(primary_key=True)
+     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+     front: Mapped[str] = mapped_column(Text)
+--- a/backend/app/cards.py
++++ b/backend/app/cards.py
+@@ -1,6 +1,7 @@
+ from datetime import datetime, timedelta, timezone
+ from typing import Annotated
+ from uuid import UUID
++import unicodedata
+ 
+ from fastapi import APIRouter, HTTPException
+ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+@@ -20,9 +21,17 @@
+     back: CardText
+ 
+ 
++class PracticeWord(BaseModel):
++    word: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
++    phrase: Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)] = ""
++    situation: Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)] = ""
++
++
+ class CardView(CardCreate):
+     model_config = ConfigDict(from_attributes=True)
+ 
++    practice_key: str | None = None
++    situation: str | None = None
+     id: int
+     due: datetime
+     stability: float
+@@ -55,6 +64,31 @@
+ def create_card(payload: CardCreate, user: CurrentUser, db: DB) -> CardView:
+     card = Card(**payload.model_dump(), user_id=user.id, due=utc_now())
+     db.add(card)
++    db.flush()
++    result = card_view(card)
++    db.commit()
++    return result
++
++
++@router.put("/practice-words")
++def save_practice_word(payload: PracticeWord, user: CurrentUser, db: DB) -> CardView:
++    word = unicodedata.normalize("NFC", " ".join(payload.word.split()))
++    key = word.replace("’", "'").casefold()
++    user_id = user.id
++    query = select(Card).where(Card.user_id == user_id, Card.practice_key == key).with_for_update()
++    card = db.scalar(query)
++    if card is None:
++        card = Card(user_id=user_id, practice_key=key, front=word, back=payload.phrase or word, due=utc_now())
++        db.add(card)
++        try:
++            db.flush()
++        except IntegrityError:
++            # Another request may have created this expression since the lookup.
++            db.rollback()
++            card = db.scalar(query)
++            if card is None:
++                raise
++    card.front, card.back, card.situation = word, payload.phrase or word, payload.situation or None
+     db.flush()
+     result = card_view(card)
+     db.commit()
+--- /dev/null
++++ b/backend/migrations/versions/0004_practice_words.py
+@@ -0,0 +1,21 @@
++"""Keep source expressions and reply situations on learner-owned review cards."""
++import sqlalchemy as sa
++from alembic import op
++
++revision = "0004_practice_words"
++down_revision = "0003_review_retries"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.add_column("cards", sa.Column("practice_key", sa.String(300), nullable=True))
++    op.add_column("cards", sa.Column("situation", sa.Text(), nullable=True))
++    op.create_index("uq_cards_user_practice_key", "cards", ["user_id", "practice_key"], unique=True)
++
++
++def downgrade() -> None:
++    op.drop_index("uq_cards_user_practice_key", table_name="cards")
++    with op.batch_alter_table("cards") as batch:
++        batch.drop_column("situation")
++        batch.drop_column("practice_key")
+--- a/backend/tests/test_cards.py
++++ b/backend/tests/test_cards.py
+@@ -203,3 +203,24 @@
+             events.append(ws.receive_json())
+         assert any(event["type"] == "done" for event in events)
+     assert client.get("/progress", headers=headers).json()["attempts"] == 0
++
++
++def test_practice_word_saves_preserve_schedule_and_owner(api):
++    client, _ = api
++    owner = register(client, "practice@example.test")
++    other = register(client, "second@example.test")
++    original = {"word": "Rain  check", "phrase": "Could I take a rain check?", "situation": "Can you join us?"}
++    card = client.put("/practice-words", headers=owner, json=original).raise_for_status().json()
++    assert card["practice_key"] == "rain check" and card["situation"] == original["situation"]
++    review = {"card_id": card["id"], "rating": 3, "request_id": str(uuid4())}
++    scheduled = client.post("/reviews", headers=owner, json=review).raise_for_status().json()["card"]
++    edit = {**original, "word": "RAIN CHECK", "situation": "How about lunch?"}
++    updated = client.put("/practice-words", headers=owner, json=edit).raise_for_status().json()
++    assert updated["id"] == card["id"] and updated["situation"] == edit["situation"]
++    for field in ("due", "stability", "difficulty"):
++        assert scheduled[field] == updated[field]
++    assert client.put("/practice-words", headers=owner, json=edit).json() == updated
++    assert client.get("/cards/due", headers=owner).json() == []
++    independent = client.put("/practice-words", headers=other, json=original).raise_for_status().json()
++    assert independent["id"] != card["id"]
++    assert client.get("/cards/due", headers=other).json() == [independent]
+--- a/backend/tests/test_migrations.py
++++ b/backend/tests/test_migrations.py
+@@ -22,3 +22,28 @@
+     finally:
+         engine.dispose()
+         get_engine.cache_clear()
++
++
++def test_existing_cards_survive_practice_word_migration(monkeypatch):
++    from sqlalchemy import text
++
++    monkeypatch.setenv("DATABASE_URL", "sqlite://")
++    config = Config(Path(__file__).resolve().parents[1] / "alembic.ini")
++    engine = get_engine()
++    try:
++        command.upgrade(config, "0003_review_retries")
++        with engine.begin() as conn:
++            conn.execute(text("INSERT INTO users (id,email,password_hash) VALUES (1,'test@example.test','fixture')"))
++            for card_id in (1, 2):
++                conn.execute(text("INSERT INTO cards (id,user_id,front,back,stability,difficulty) "
++                                  "VALUES (:id,1,'seat','chỗ ngồi',4.3,2.1)"), {"id":card_id})
++        command.upgrade(config, "head")
++        with engine.connect() as conn:
++            rows = conn.execute(text("SELECT front,stability,practice_key,situation FROM cards ORDER BY id")).all()
++            assert rows == [("seat",4.3,None,None)] * 2
++        command.downgrade(config, "0003_review_retries")
++        with engine.connect() as conn:
++            assert conn.execute(text("SELECT count(*) FROM cards")).scalar_one() == 2
++    finally:
++        engine.dispose()
++        get_engine.cache_clear()

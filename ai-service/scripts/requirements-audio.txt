@@ -1,0 +1,4 @@
+numpy==2.5.4
+soundfile==0.14.0
+imageio-ffmpeg==0.8.1
+webrtcvad-wheels==2.0.14.post1

@@ -17,13 +17,13 @@ def test_normalize_gop_bounds():
     assert normalize_gop(-2.5) == 50.0
 
 
-def test_assess_shape():
+def test_legacy_assess_does_not_fabricate_a_score():
     r = client.post(
         "/assess",
         files={"audio": ("a.wav", b"RIFF", "audio/wav")},
         data={"text": "hello world"},
     )
     body = r.json()
-    assert r.status_code == 200
-    assert len(body["words"]) == 2
-    assert 0 <= body["sentence_score"] <= 100
+    assert r.status_code == 501
+    assert "not implemented" in body["detail"]
+    assert "sentence_score" not in body
