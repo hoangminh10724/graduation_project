@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 342" fill="none">
+  <defs>
+    <pattern id="dots" width="17" height="17" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.2" fill="#a99df1"/></pattern>
+    <linearGradient id="body" x1="140" y1="75" x2="388" y2="291" gradientUnits="userSpaceOnUse"><stop stop-color="#fff"/><stop offset="1" stop-color="#f0ebff"/></linearGradient>
+    <linearGradient id="mic" x1="253" y1="100" x2="312" y2="225" gradientUnits="userSpaceOnUse"><stop stop-color="#a296ff"/><stop offset="1" stop-color="#6350df"/></linearGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="200%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#6951be" flood-opacity=".17"/></filter>
+  </defs>
+  <circle cx="300" cy="173" r="145" fill="#e2d9fd"/>
+  <circle cx="300" cy="173" r="133" stroke="#c8b9f8" stroke-dasharray="3 7"/>
+  <path d="M94 121a178 178 0 0 1 144-108m139 10a177 177 0 0 1 105 174M136 280a177 177 0 0 0 109 54" stroke="#bcaaf5" stroke-linecap="round"/>
+  <path d="M391 34h115v101H391zM36 199h124v106H36z" fill="url(#dots)" opacity=".65"/>
+  <path d="M123 68v17m-8-8h16m346 176v22m-11-11h22M410 114v17m-8-8h16" stroke="#9e83e9" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="179" cy="38" r="4" fill="#9e83e9"/><circle cx="439" cy="303" r="4" fill="#9277e2"/><circle cx="76" cy="158" r="4" fill="#b3a0f4"/>
+  <g transform="rotate(-8 285 172)" filter="url(#shadow)">
+    <rect x="164" y="66" width="234" height="218" rx="40" fill="url(#body)" stroke="white" stroke-width="2"/>
+    <rect x="188" y="88" width="186" height="174" rx="32" fill="#e8e0ff" stroke="#ded2fc"/>
+    <path d="M207 171h9m7-11v22m9-33v44m10-50v56m81-48v39m10-32v25m10-20v15m9-11h7" stroke="#a890ec" stroke-width="3.5" stroke-linecap="round"/>
+    <rect x="258" y="106" width="51" height="91" rx="25.5" fill="url(#mic)"/>
+    <path d="M246 168v7a38 38 0 0 0 76 0v-7m-38 45v17m-17 0h34" stroke="#6851dd" stroke-width="5" stroke-linecap="round"/>
+    <path d="M270 130h13m-13 13h13m-13 13h13" stroke="#d8ceff" stroke-width="3" stroke-linecap="round"/>
+  </g>
+  <g transform="rotate(9 440 98)" filter="url(#shadow)">
+    <rect x="404" y="65" width="83" height="62" rx="18" fill="#fff"/>
+    <path d="m425 122 1 16 15-13" fill="#fff"/>
+    <text x="445" y="105" text-anchor="middle" fill="#5846cf" font-size="25" font-weight="700" font-family="Segoe UI, sans-serif">/ʃ/</text>
+  </g>
+  <g transform="rotate(-8 130 234)" filter="url(#shadow)">
+    <rect x="74" y="206" width="107" height="54" rx="16" fill="#fff"/>
+    <path d="M94 233h5m5-5v10m6-16v22m6-18v14m6-7h6m5-8v16m6-21v26m6-19v12m6-9v6m6-3h5" stroke="#7762e6" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+</svg>
